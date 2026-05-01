@@ -1,0 +1,338 @@
+{
+  "Common": {
+    "AppxPackages": [
+      "Microsoft.BingNews",
+      "Microsoft.BingWeather",
+      "Microsoft.GetHelp",
+      "Microsoft.Getstarted",
+      "Microsoft.Microsoft3DViewer",
+      "Microsoft.MicrosoftOfficeHub",
+      "Microsoft.MicrosoftSolitaireCollection",
+      "Microsoft.MicrosoftStickyNotes",
+      "Microsoft.People",
+      "Microsoft.PowerAutomateDesktop",
+      "Microsoft.Todos",
+      "Microsoft.WindowsFeedbackHub",
+      "Microsoft.WindowsMaps",
+      "Microsoft.Xbox.TCUI",
+      "Microsoft.XboxApp",
+      "Microsoft.XboxGameOverlay",
+      "Microsoft.XboxGamingOverlay",
+      "Microsoft.XboxIdentityProvider",
+      "Microsoft.XboxSpeechToTextOverlay",
+      "Microsoft.YourPhone",
+      "Microsoft.ZuneMusic",
+      "Microsoft.ZuneVideo",
+      "Clipchamp.Clipchamp",
+      "Microsoft.BingSearch",
+      "MicrosoftCorporationII.MicrosoftFamily",
+      "MicrosoftWindows.Client.WebExperience",
+      "Microsoft.Windows.DevHome"
+    ],
+    "DisableServices": [
+      "DiagTrack",
+      "SysMain",
+      "WSearch"
+    ],
+    "DisableScheduledTasks": [
+      "\\Microsoft\\Windows\\Customer Experience Improvement Program\\Consolidator",
+      "\\Microsoft\\Windows\\Application Experience\\ProgramDataUpdater"
+    ],
+    "RegistryTweaks": [
+      {
+        "Path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent",
+        "Name": "DisableWindowsConsumerFeatures",
+        "Type": "DWord",
+        "Value": 1
+      }
+    ],
+    "DisableHibernation": true,
+    "RemoveCopilotIfM365Present": true,
+    "RemoveConsumerOneDriveIfBusinessPresent": true
+  },
+  "ManufacturerAliases": {
+    "Dell": [
+      "Dell",
+      "Dell Inc.",
+      "Dell Technologies"
+    ],
+    "Lenovo": [
+      "Lenovo",
+      "LENOVO"
+    ],
+    "HP": [
+      "HP",
+      "Hewlett-Packard",
+      "Hewlett Packard",
+      "HP Inc."
+    ],
+    "Acer": [
+      "Acer",
+      "Acer Incorporated"
+    ],
+    "ASUS": [
+      "ASUSTeK COMPUTER INC.",
+      "ASUS",
+      "ASUSTeK"
+    ],
+    "MSI": [
+      "Micro-Star International",
+      "MSI"
+    ],
+    "Samsung": [
+      "Samsung",
+      "SAMSUNG ELECTRONICS"
+    ],
+    "Microsoft": [
+      "Microsoft",
+      "Microsoft Corporation"
+    ],
+    "Razer": [
+      "Razer"
+    ],
+    "Huawei": [
+      "HUAWEI",
+      "Huawei"
+    ],
+    "LG": [
+      "LG Electronics",
+      "LG"
+    ],
+    "Gigabyte": [
+      "Gigabyte",
+      "GIGABYTE"
+    ],
+    "Fujitsu": [
+      "FUJITSU",
+      "Fujitsu"
+    ],
+    "Panasonic": [
+      "Panasonic"
+    ],
+    "Dynabook": [
+      "TOSHIBA",
+      "Dynabook"
+    ],
+    "VAIO": [
+      "VAIO"
+    ],
+    "Framework": [
+      "Framework"
+    ]
+  },
+  "Dell": {
+    "AppxPackages": [
+      "DellInc.DellDigitalDelivery",
+      "DellInc.DellPowerManager",
+      "DellInc.DellSupportAssistforPCs",
+      "DellInc.DellSupportAssistRemediation",
+      "DellInc.MyDell",
+      "DellInc.DellOptimizer",
+      "DellInc.DellUpdate",
+      "DellInc.PCApp",
+      "KillerNetworking.KillerControlCenter"
+    ],
+    "WingetPackages": [
+      "Dell.SupportAssist",
+      "Dell.CommandUpdate",
+      "Dell.Update",
+      "Dell.SupportAssistOSRecovery",
+      "Intel.KillerControlCenter"
+    ],
+    "Services": [
+      "DellClientManagementService",
+      "SupportAssistAgent",
+      "KillerNetworkService"
+    ],
+    "ScheduledTasks": [
+      "\\Dell\\SupportAssistAgent AutoUpdate",
+      "\\Dell\\SupportAssistAgent",
+      "\\Dell\\Dell Update\\Dell Update"
+    ]
+  },
+  "Lenovo": {
+    "AppxPackages": [
+      "E0469640.LenovoCompanion",
+      "E046963F.LenovoSettings",
+      "E0469640.LenovoUtility"
+    ],
+    "WingetPackages": [
+      "Lenovo.Vantage",
+      "Lenovo.SystemUpdate"
+    ],
+    "Services": [
+      "ImControllerService",
+      "LenovoVantageService"
+    ],
+    "ScheduledTasks": [
+      "\\Lenovo\\ImController\\PluginHost",
+      "\\Lenovo\\LenovoVantage\\UpdateTask"
+    ]
+  },
+  "HP": {
+    "AppxPackages": [
+      "AD2F1837.HPJumpStarts",
+      "AD2F1837.HPPrivacySettings",
+      "AD2F1837.HPSupportAssistant"
+    ],
+    "WingetPackages": [
+      "HP.SupportAssistant",
+      "HP.HPQuickDrop"
+    ],
+    "Services": [
+      "HPAppHelperCap",
+      "HPNetworkCap"
+    ],
+    "ScheduledTasks": [
+      "\\HP\\HP Support Assistant\\HP Support Assistant Quick Start",
+      "\\HP\\HP Support Assistant\\HP Support Solutions Framework Update"
+    ]
+  },
+  "Acer": {
+    "AppxPackages": [
+      "AcerIncorporated.*",
+      "AcerInc.*"
+    ],
+    "WingetPackages": [
+      "Acer.QuickAccess",
+      "Acer.CareCenterS"
+    ],
+    "Services": [
+      "AcerUEIPFramework",
+      "AcerService",
+      "AcerQuickAccess"
+    ],
+    "ScheduledTasks": [
+      "\\Acer\\Acer Care Center Startup Task",
+      "\\Acer\\Acer Update Task"
+    ]
+  },
+  "ASUS": {
+    "AppxPackages": [
+      "B9ECED6F.*",
+      "ASUSTeKComputerInc.*"
+    ],
+    "WingetPackages": [
+      "ASUS.MyASUS",
+      "ASUS.ArmouryCrate"
+    ],
+    "Services": [
+      "ASUSOptimization",
+      "ASUSSoftwareManager",
+      "ArmouryCrateService"
+    ],
+    "ScheduledTasks": [
+      "\\ASUS\\ASUS Optimization Startup Task",
+      "\\ASUS\\ASUS Update Checker 2.0"
+    ]
+  },
+  "MSI": {
+    "AppxPackages": [
+      "9426MICRO-STARINTERNATIONAL.*",
+      "MSI*"
+    ],
+    "WingetPackages": [
+      "MSI.MSICenter",
+      "MSI.Afterburner"
+    ],
+    "Services": [
+      "MSI_Center_Service",
+      "MSI_VoiceControl_Service",
+      "Mystic_Light_Service"
+    ],
+    "ScheduledTasks": [
+      "\\MSI\\MSI Center Live Update",
+      "\\MSI\\MSI Center"
+    ]
+  },
+  "Samsung": {
+    "AppxPackages": [
+      "SAMSUNGELECTRONICSCO.LTD.*",
+      "Samsung*"
+    ],
+    "WingetPackages": [
+      "Samsung.SamsungSettings",
+      "Samsung.SamsungUpdate"
+    ],
+    "Services": [
+      "SamsungUpdateService",
+      "SamsungDeviceCareService"
+    ],
+    "ScheduledTasks": [
+      "\\Samsung\\Samsung Update",
+      "\\Samsung\\Samsung Settings"
+    ]
+  },
+  "Microsoft": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  },
+  "Razer": {
+    "AppxPackages": [
+      "RazerInc.*"
+    ],
+    "WingetPackages": [
+      "Razer.Synapse",
+      "Razer.Axon"
+    ],
+    "Services": [
+      "Razer Synapse Service",
+      "Razer Game Manager Service",
+      "RzActionSvc"
+    ],
+    "ScheduledTasks": [
+      "\\Razer\\Razer Synapse Service Process",
+      "\\Razer\\RazerCentral"
+    ]
+  },
+  "Huawei": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  },
+  "LG": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  },
+  "Gigabyte": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  },
+  "Fujitsu": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  },
+  "Panasonic": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  },
+  "Dynabook": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  },
+  "VAIO": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  },
+  "Framework": {
+    "AppxPackages": [],
+    "WingetPackages": [],
+    "Services": [],
+    "ScheduledTasks": []
+  }
+}
