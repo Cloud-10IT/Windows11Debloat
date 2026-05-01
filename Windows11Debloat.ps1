@@ -13,16 +13,191 @@ param(
     [switch]$IncludeCommon,
 
     [Parameter(Mandatory = $false)]
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$IntuneMode,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$HelpdeskMode,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('All', 'Device', 'User')]
+    [string]$CleanupScope = 'All',
+
+    [Parameter(Mandatory = $false)]
+    [string]$MarkerRegistryPath = 'HKLM:\SOFTWARE\Windows11Debloat',
+
+    [Parameter(Mandatory = $false)]
+    [string]$LogBasePath = 'C:\Logs',
+
+    [Parameter(Mandatory = $false)]
+    [string]$ScriptCacheBasePath = 'C:\'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:BoundParameters = @{} + $PSBoundParameters
+$script:TranscriptStarted = $false
+$script:WarningCount = 0
+$script:ErrorCount = 0
+$script:ExitCode = 0
+$script:SkipMarkerWrite = $false
+$script:RunContext = 'Unknown'
+$script:RunMode = 'Standard'
+$script:DevicePhaseStatus = 'Pending'
+$script:UserPhaseStatus = 'Pending'
+$script:ResolvedVendor = $Vendor
+$script:ResolvedCleanupScope = $CleanupScope
+$script:ExitCodes = @{
+    Success = 0
+    ElevationRequired = 10
+    InvalidConfiguration = 11
+    DetectionFailed = 12
+    RuntimeFailure = 20
+}
+
+function Convert-BoundParametersToArgumentList {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$BoundParameters,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptPath
+    )
+
+    $argumentList = [System.Collections.Generic.List[string]]::new()
+    $argumentList.Add('-NoProfile')
+    $argumentList.Add('-ExecutionPolicy')
+    $argumentList.Add('Bypass')
+    $argumentList.Add('-File')
+    $argumentList.Add($ScriptPath)
+
+    foreach ($entry in $BoundParameters.GetEnumerator()) {
+        if ($entry.Value -is [switch]) {
+            if ($entry.Value.IsPresent) {
+                $argumentList.Add("-$($entry.Key)")
+            }
+            continue
+        }
+
+        if ($entry.Value -is [bool]) {
+            if ($entry.Value) {
+                $argumentList.Add("-$($entry.Key)")
+            }
+            continue
+        }
+
+        if ($null -ne $entry.Value) {
+            $argumentList.Add("-$($entry.Key)")
+            $argumentList.Add([string]$entry.Value)
+        }
+    }
+
+    return $argumentList.ToArray()
+}
+
+function Start-ElevatedSelf {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$BoundParameters,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptPath
+    )
+
+    $hostCommand = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) {
+        'pwsh.exe'
+    }
+    elseif (Get-Command powershell.exe -ErrorAction SilentlyContinue) {
+        'powershell.exe'
+    }
+    else {
+        throw 'Unable to find pwsh.exe or powershell.exe for elevation.'
+    }
+
+    $argumentList = Convert-BoundParametersToArgumentList -BoundParameters $BoundParameters -ScriptPath $ScriptPath
+    Start-Process -FilePath $hostCommand -ArgumentList $argumentList -Verb RunAs | Out-Null
+}
+
+function Start-RunTranscript {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ModeName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$BasePath
+    )
+
+    $logRoot = Get-LogRootPath -BasePath $BasePath
+    if (-not (Test-Path -Path $logRoot)) {
+        New-Item -Path $logRoot -ItemType Directory -Force | Out-Null
+    }
+
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $safeModeName = ($ModeName -replace '[^a-zA-Z0-9_-]', '-')
+    $logPath = Join-Path -Path $logRoot -ChildPath "$safeModeName-$timestamp.log"
+
+    Start-Transcript -Path $logPath -Force | Out-Null
+    $script:TranscriptStarted = $true
+    Write-Status -Message "Transcript logging to: $logPath" -Level 'Info'
+}
 
 function Test-IsAdministrator {
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-LogRootPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BasePath
+    )
+
+    $domainName = $null
+
+    try {
+        $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        if ($computerSystem.PartOfDomain -and -not [string]::IsNullOrWhiteSpace($computerSystem.Domain)) {
+            $domainName = [string]$computerSystem.Domain
+        }
+    }
+    catch {
+    }
+
+    if ([string]::IsNullOrWhiteSpace($domainName) -and -not [string]::IsNullOrWhiteSpace($env:USERDOMAIN)) {
+        $domainName = $env:USERDOMAIN
+    }
+
+    if ([string]::IsNullOrWhiteSpace($domainName) -or $domainName -eq $env:COMPUTERNAME -or $domainName -eq 'WORKGROUP') {
+        $domainName = 'Default'
+    }
+
+    $safeDomainName = $domainName -replace '[\\/:*?"<>|]', '-'
+    return (Join-Path -Path $BasePath -ChildPath $safeDomainName)
+}
+
+function Get-DomainScopedPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BasePath,
+
+        [Parameter(Mandatory = $false)]
+        [string]$ChildPath = ''
+    )
+
+    $domainRoot = Get-LogRootPath -BasePath $BasePath
+    if ([string]::IsNullOrWhiteSpace($ChildPath)) {
+        return $domainRoot
+    }
+
+    return (Join-Path -Path $domainRoot -ChildPath $ChildPath)
+}
+
+function Test-IsSystemContext {
+    $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return $currentIdentity.User.Value -eq 'S-1-5-18'
 }
 
 function Write-Status {
@@ -36,11 +211,50 @@ function Write-Status {
     )
 
     switch ($Level) {
+        'Warn' { $script:WarningCount++ }
+        'Error' { $script:ErrorCount++ }
+    }
+
+    switch ($Level) {
         'Info'    { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
         'Warn'    { Write-Host "[WARN] $Message" -ForegroundColor Yellow }
         'Error'   { Write-Host "[ERROR] $Message" -ForegroundColor Red }
         'Success' { Write-Host "[OK] $Message" -ForegroundColor Green }
     }
+}
+
+function Copy-HelpdeskArtifacts {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationRoot
+    )
+
+    $artifactNames = @(
+        'Windows11Debloat.ps1',
+        'vendor-profiles.json',
+        'Run-Windows11Debloat-Helpdesk.cmd',
+        'README.md'
+    )
+
+    if (-not (Test-Path -Path $DestinationRoot)) {
+        New-Item -Path $DestinationRoot -ItemType Directory -Force | Out-Null
+    }
+
+    foreach ($artifactName in $artifactNames) {
+        $sourcePath = Join-Path -Path $SourceRoot -ChildPath $artifactName
+        if (-not (Test-Path -Path $sourcePath)) {
+            Write-Status -Message "Staging skipped for missing artifact: $sourcePath" -Level 'Warn'
+            continue
+        }
+
+        $destinationPath = Join-Path -Path $DestinationRoot -ChildPath $artifactName
+        Copy-Item -Path $sourcePath -Destination $destinationPath -Force
+    }
+
+    Write-Status -Message "Staged helpdesk artifacts to: $DestinationRoot" -Level 'Success'
 }
 
 function Get-VendorProfiles {
@@ -209,6 +423,7 @@ function Resolve-VendorFromManufacturer {
 }
 
 function Remove-AppxByName {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$Names
@@ -244,6 +459,7 @@ function Remove-AppxByName {
 }
 
 function Uninstall-WingetPackages {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$Ids
@@ -251,15 +467,36 @@ function Uninstall-WingetPackages {
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Status -Message 'winget is not available. Skipping winget package removals.' -Level 'Warn'
+        if ($script:IsSystemContext) {
+            Write-Status -Message 'This is common in Intune/SYSTEM context on a new machine. Appx removals can still proceed, but winget-managed removals may need a user-context pass later.' -Level 'Info'
+        }
         return
     }
 
     foreach ($id in $Ids) {
         try {
-            if ($PSCmdlet.ShouldProcess($id, 'winget uninstall')) {
-                winget uninstall --id $id --silent --accept-source-agreements | Out-Null
+            $removed = $false
+
+            if ($PSCmdlet.ShouldProcess($id, 'winget uninstall by id')) {
+                winget uninstall --id $id --exact --silent --accept-source-agreements | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    $removed = $true
+                }
             }
-            Write-Status -Message "Attempted winget uninstall: $id" -Level 'Info'
+
+            if (-not $removed -and $PSCmdlet.ShouldProcess($id, 'winget uninstall by name')) {
+                winget uninstall --name $id --exact --silent --accept-source-agreements | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    $removed = $true
+                }
+            }
+
+            if ($removed) {
+                Write-Status -Message "Removed winget package: $id" -Level 'Success'
+            }
+            else {
+                Write-Status -Message "winget package not found or not removed: $id" -Level 'Warn'
+            }
         }
         catch {
             Write-Status -Message "Failed winget uninstall '$id'. $($_.Exception.Message)" -Level 'Warn'
@@ -268,6 +505,7 @@ function Uninstall-WingetPackages {
 }
 
 function Disable-ServicesSafe {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$ServiceNames
@@ -298,6 +536,7 @@ function Disable-ServicesSafe {
 }
 
 function Set-HibernationState {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory = $true)]
         [bool]$Enabled
@@ -323,6 +562,7 @@ function Set-HibernationState {
 }
 
 function Invoke-ConditionalCopilotRemoval {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     $m365Key = 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration'
     $m365Present = $false
 
@@ -345,16 +585,21 @@ function Invoke-ConditionalCopilotRemoval {
 
     Write-Status -Message 'Microsoft 365 detected. Removing standalone Windows Copilot app.' -Level 'Info'
     Remove-AppxByName -Names @('Microsoft.Windows.Copilot', 'Microsoft.Copilot')
+    Uninstall-WingetPackages -Ids @('Copilot')
 }
 
 function Invoke-OneDriveCorpCleanup {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     $odfbPresent = $false
-    $odfbAccountsKey = 'HKCU:\Software\Microsoft\OneDrive\Accounts'
+    $oneDriveAccountSearchRoots = @(
+        'HKCU:\Software\Microsoft\OneDrive\Accounts',
+        'Registry::HKEY_USERS\*\Software\Microsoft\OneDrive\Accounts\*'
+    )
 
-    if (Test-Path -Path $odfbAccountsKey) {
+    foreach ($accountPath in $oneDriveAccountSearchRoots) {
         try {
-            $subkeys = Get-ChildItem -Path $odfbAccountsKey -ErrorAction Stop
-            foreach ($key in $subkeys) {
+            $matchingKeys = Get-Item -Path $accountPath -ErrorAction SilentlyContinue
+            foreach ($key in $matchingKeys) {
                 if ($key.PSChildName -like 'Business*') {
                     $odfbPresent = $true
                     break
@@ -362,7 +607,11 @@ function Invoke-OneDriveCorpCleanup {
             }
         }
         catch {
-            Write-Status -Message "Failed to read OneDrive Accounts registry. $($_.Exception.Message)" -Level 'Warn'
+            Write-Status -Message "Failed to read OneDrive Accounts registry from '$accountPath'. $($_.Exception.Message)" -Level 'Warn'
+        }
+
+        if ($odfbPresent) {
+            break
         }
     }
 
@@ -406,6 +655,7 @@ function Invoke-OneDriveCorpCleanup {
 }
 
 function Disable-ScheduledTasksSafe {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$TaskPaths
@@ -443,6 +693,7 @@ function Disable-ScheduledTasksSafe {
 }
 
 function Set-RegistryTweaks {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory = $true)]
         [array]$Tweaks
@@ -473,88 +724,313 @@ function Set-RegistryTweaks {
     }
 }
 
-if (-not (Test-IsAdministrator)) {
-    throw 'This script must be run as Administrator.'
-}
+function Write-DetectionMarker {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
 
-$profiles = Get-VendorProfiles -Path $ProfilesPath
+        [Parameter(Mandatory = $true)]
+        [string]$Status,
 
-$metadataKeys = @('Common', 'ManufacturerAliases')
+        [Parameter(Mandatory = $true)]
+        [int]$ExitCode,
 
-$availableVendors = @(
-    $profiles.PSObject.Properties.Name | Where-Object { $metadataKeys -notcontains $_ }
-)
+        [Parameter(Mandatory = $true)]
+        [string]$VendorName,
 
-$manufacturerAliases = $profiles.PSObject.Properties['ManufacturerAliases'].Value
+        [Parameter(Mandatory = $true)]
+        [string]$Scope,
 
-if ($availableVendors.Count -eq 0) {
-    throw "No vendor profiles found in '$ProfilesPath'."
-}
+        [Parameter(Mandatory = $true)]
+        [string]$RunMode,
 
-if ($AutoDetect) {
-    $manufacturer = Get-SystemManufacturer
-    if ([string]::IsNullOrWhiteSpace($manufacturer)) {
-        throw "AutoDetect could not determine system manufacturer. Use -Vendor with one of: $($availableVendors -join ', ')"
-    }
+        [Parameter(Mandatory = $true)]
+        [string]$RunContext
+    )
 
-    $detectedVendor = Resolve-VendorFromManufacturer -Manufacturer $manufacturer -AvailableVendors $availableVendors -ManufacturerAliases $manufacturerAliases
-    if ([string]::IsNullOrWhiteSpace($detectedVendor)) {
-        throw "AutoDetect could not map manufacturer '$manufacturer' to a vendor profile. Available vendors: $($availableVendors -join ', ')"
-    }
-
-    $Vendor = $detectedVendor
-    Write-Status -Message "AutoDetect selected vendor '$Vendor' from manufacturer '$manufacturer'." -Level 'Info'
-}
-
-if ($availableVendors -notcontains $Vendor) {
-    $vendorList = $availableVendors -join ', '
-    throw "No profile found for vendor '$Vendor'. Available vendors: $vendorList"
-}
-
-$selectedProfile = $profiles.PSObject.Properties[$Vendor].Value
-
-if (-not $selectedProfile) {
-    throw "No profile found for vendor '$Vendor'."
-}
-
-if ($DryRun) {
-    $WhatIfPreference = $true
-    Write-Status -Message 'Dry run enabled. No changes will be applied.' -Level 'Warn'
-}
-
-Write-Status -Message "Starting debloat profile for vendor: $Vendor" -Level 'Info'
-
-if ($IncludeCommon) {
-    $commonProfile = $profiles.PSObject.Properties['Common'].Value
-
-    if ($null -eq $commonProfile) {
-        Write-Status -Message 'Common profile not found in vendor profile file. Skipping common actions.' -Level 'Warn'
-    }
-    else {
-        Write-Status -Message 'Applying common debloat profile.' -Level 'Info'
-
-        Remove-AppxByName -Names (Get-StringListProperty -InputObject $commonProfile -PropertyName 'AppxPackages')
-        Disable-ServicesSafe -ServiceNames (Get-StringListProperty -InputObject $commonProfile -PropertyName 'DisableServices')
-        Disable-ScheduledTasksSafe -TaskPaths (Get-StringListProperty -InputObject $commonProfile -PropertyName 'DisableScheduledTasks')
-        Set-RegistryTweaks -Tweaks (Get-ArrayProperty -InputObject $commonProfile -PropertyName 'RegistryTweaks')
-
-        if (Get-BoolProperty -InputObject $commonProfile -PropertyName 'DisableHibernation' -DefaultValue $false) {
-            Set-HibernationState -Enabled $false
+    try {
+        if (-not (Test-Path -Path $Path)) {
+            New-Item -Path $Path -Force | Out-Null
         }
 
-        if (Get-BoolProperty -InputObject $commonProfile -PropertyName 'RemoveCopilotIfM365Present' -DefaultValue $false) {
+        $values = @(
+            @{ Name = 'LastRunUtc'; Value = (Get-Date).ToUniversalTime().ToString('o'); Type = 'String' },
+            @{ Name = 'LastRunStatus'; Value = $Status; Type = 'String' },
+            @{ Name = 'LastExitCode'; Value = $ExitCode; Type = 'DWord' },
+            @{ Name = 'LastVendor'; Value = $VendorName; Type = 'String' },
+            @{ Name = 'CleanupScope'; Value = $Scope; Type = 'String' },
+            @{ Name = 'RunMode'; Value = $RunMode; Type = 'String' },
+            @{ Name = 'RunContext'; Value = $RunContext; Type = 'String' },
+            @{ Name = 'WarningCount'; Value = $script:WarningCount; Type = 'DWord' },
+            @{ Name = 'ErrorCount'; Value = $script:ErrorCount; Type = 'DWord' },
+            @{ Name = 'DevicePhaseStatus'; Value = $script:DevicePhaseStatus; Type = 'String' },
+            @{ Name = 'UserPhaseStatus'; Value = $script:UserPhaseStatus; Type = 'String' },
+            @{ Name = 'DryRun'; Value = [int]$DryRun.IsPresent; Type = 'DWord' }
+        )
+
+        foreach ($value in $values) {
+            New-ItemProperty -Path $Path -Name $value.Name -Value $value.Value -PropertyType $value.Type -Force | Out-Null
+        }
+
+        Write-Status -Message "Updated marker registry key: $Path" -Level 'Info'
+    }
+    catch {
+        Write-Status -Message "Failed to update marker registry key '$Path'. $($_.Exception.Message)" -Level 'Warn'
+    }
+}
+
+function Resolve-ExitCode {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Exception]$Exception
+    )
+
+    $message = $Exception.Message
+
+    if ($Exception -is [System.UnauthorizedAccessException] -or $message -like '*must be run as Administrator*') {
+        return $script:ExitCodes.ElevationRequired
+    }
+
+    if ($message -like 'Vendor profile file not found:*' -or
+        $message -like 'Failed to parse vendor profile file*' -or
+        $message -like 'No vendor profiles found*' -or
+        $message -like 'No profile found for vendor*') {
+        return $script:ExitCodes.InvalidConfiguration
+    }
+
+    if ($message -like 'AutoDetect could not*') {
+        return $script:ExitCodes.DetectionFailed
+    }
+
+    return $script:ExitCodes.RuntimeFailure
+}
+
+function Invoke-DeviceContextCleanup {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
+    param(
+        [Parameter(Mandatory = $false)]
+        [object]$CommonProfile,
+
+        [Parameter(Mandatory = $true)]
+        [object]$SelectedProfile,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$IncludeCommonProfile
+    )
+
+    Write-Status -Message 'Starting device-context cleanup phase.' -Level 'Info'
+
+    if ($IncludeCommonProfile -and $null -ne $CommonProfile) {
+        Remove-AppxByName -Names (Get-StringListProperty -InputObject $CommonProfile -PropertyName 'AppxPackages')
+        Disable-ServicesSafe -ServiceNames (Get-StringListProperty -InputObject $CommonProfile -PropertyName 'DisableServices')
+        Disable-ScheduledTasksSafe -TaskPaths (Get-StringListProperty -InputObject $CommonProfile -PropertyName 'DisableScheduledTasks')
+        Set-RegistryTweaks -Tweaks (Get-ArrayProperty -InputObject $CommonProfile -PropertyName 'RegistryTweaks')
+
+        if (Get-BoolProperty -InputObject $CommonProfile -PropertyName 'DisableHibernation' -DefaultValue $false) {
+            Set-HibernationState -Enabled $false
+        }
+    }
+
+    Remove-AppxByName -Names (Get-StringListProperty -InputObject $SelectedProfile -PropertyName 'AppxPackages')
+    Disable-ServicesSafe -ServiceNames (Get-StringListProperty -InputObject $SelectedProfile -PropertyName 'Services')
+    Disable-ScheduledTasksSafe -TaskPaths (Get-StringListProperty -InputObject $SelectedProfile -PropertyName 'ScheduledTasks')
+
+    $script:DevicePhaseStatus = 'Completed'
+    Write-Status -Message 'Completed device-context cleanup phase.' -Level 'Success'
+}
+
+function Invoke-UserContextCleanup {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
+    param(
+        [Parameter(Mandatory = $false)]
+        [object]$CommonProfile,
+
+        [Parameter(Mandatory = $true)]
+        [object]$SelectedProfile,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$IncludeCommonProfile
+    )
+
+    Write-Status -Message 'Starting user-context cleanup phase.' -Level 'Info'
+
+    if ($script:IsSystemContext) {
+        Write-Status -Message 'Running in SYSTEM context. User-context cleanup may be limited until a user signs in.' -Level 'Warn'
+    }
+
+    if ($IncludeCommonProfile -and $null -ne $CommonProfile) {
+        Uninstall-WingetPackages -Ids (Get-StringListProperty -InputObject $CommonProfile -PropertyName 'WingetPackages')
+
+        if (Get-BoolProperty -InputObject $CommonProfile -PropertyName 'RemoveCopilotIfM365Present' -DefaultValue $false) {
             Invoke-ConditionalCopilotRemoval
         }
 
-        if (Get-BoolProperty -InputObject $commonProfile -PropertyName 'RemoveConsumerOneDriveIfBusinessPresent' -DefaultValue $false) {
+        if (Get-BoolProperty -InputObject $CommonProfile -PropertyName 'RemoveConsumerOneDriveIfBusinessPresent' -DefaultValue $false) {
             Invoke-OneDriveCorpCleanup
         }
     }
+
+    Uninstall-WingetPackages -Ids (Get-StringListProperty -InputObject $SelectedProfile -PropertyName 'WingetPackages')
+
+    $script:UserPhaseStatus = 'Completed'
+    Write-Status -Message 'Completed user-context cleanup phase.' -Level 'Success'
 }
 
-Remove-AppxByName -Names (Get-StringListProperty -InputObject $selectedProfile -PropertyName 'AppxPackages')
-Uninstall-WingetPackages -Ids (Get-StringListProperty -InputObject $selectedProfile -PropertyName 'WingetPackages')
-Disable-ServicesSafe -ServiceNames (Get-StringListProperty -InputObject $selectedProfile -PropertyName 'Services')
-Disable-ScheduledTasksSafe -TaskPaths (Get-StringListProperty -InputObject $selectedProfile -PropertyName 'ScheduledTasks')
+function Invoke-Main {
+    if (-not (Test-IsAdministrator)) {
+        if ($HelpdeskMode -and -not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+            Write-Host '[INFO] Helpdesk mode requested without elevation. Relaunching as Administrator...'
+            $script:SkipMarkerWrite = $true
+            Start-ElevatedSelf -BoundParameters $script:BoundParameters -ScriptPath $PSCommandPath
+            return
+        }
 
-Write-Status -Message 'Debloat routine complete. A restart is recommended.' -Level 'Success'
+        throw 'This script must be run as Administrator.'
+    }
+
+    $isSystemContext = Test-IsSystemContext
+    $script:IsSystemContext = $isSystemContext
+    $script:RunContext = if ($isSystemContext) { 'System' } else { 'UserAdmin' }
+
+    if ($IntuneMode) {
+        $script:RunMode = 'Intune'
+        $ConfirmPreference = 'None'
+        $ProgressPreference = 'SilentlyContinue'
+        if (-not $script:BoundParameters.ContainsKey('CleanupScope')) {
+            $CleanupScope = 'Device'
+        }
+        Write-Status -Message 'Intune mode enabled. Running non-interactively for device provisioning.' -Level 'Info'
+
+        if (-not $isSystemContext) {
+            Write-Status -Message 'Intune mode is intended for SYSTEM context, but the current session is not running as SYSTEM.' -Level 'Warn'
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+            $scriptCachePath = Get-DomainScopedPath -BasePath $ScriptCacheBasePath -ChildPath 'Scripts'
+            Copy-HelpdeskArtifacts -SourceRoot $PSScriptRoot -DestinationRoot $scriptCachePath
+        }
+    }
+    elseif ($HelpdeskMode) {
+        $script:RunMode = 'Helpdesk'
+        if (-not $script:BoundParameters.ContainsKey('AutoDetect') -and -not $script:BoundParameters.ContainsKey('Vendor')) {
+            $AutoDetect = $true
+        }
+
+        if (-not $script:BoundParameters.ContainsKey('IncludeCommon')) {
+            $IncludeCommon = $true
+        }
+
+        $ConfirmPreference = 'None'
+        Write-Status -Message 'Helpdesk mode enabled. Defaulting to quick standalone remediation behavior.' -Level 'Info'
+    }
+
+    Start-RunTranscript -ModeName $script:RunMode -BasePath $LogBasePath
+
+    if ($isSystemContext) {
+        Write-Status -Message 'Detected SYSTEM context. Per-user cleanup may be limited on a brand-new machine until a user signs in.' -Level 'Info'
+    }
+
+    $profiles = Get-VendorProfiles -Path $ProfilesPath
+
+    $metadataKeys = @('Common', 'ManufacturerAliases')
+
+    $availableVendors = @(
+        $profiles.PSObject.Properties.Name | Where-Object { $metadataKeys -notcontains $_ }
+    )
+
+    $manufacturerAliases = $profiles.PSObject.Properties['ManufacturerAliases'].Value
+
+    if ($availableVendors.Count -eq 0) {
+        throw "No vendor profiles found in '$ProfilesPath'."
+    }
+
+    if ($AutoDetect) {
+        $manufacturer = Get-SystemManufacturer
+        if ([string]::IsNullOrWhiteSpace($manufacturer)) {
+            throw "AutoDetect could not determine system manufacturer. Use -Vendor with one of: $($availableVendors -join ', ')"
+        }
+
+        $detectedVendor = Resolve-VendorFromManufacturer -Manufacturer $manufacturer -AvailableVendors $availableVendors -ManufacturerAliases $manufacturerAliases
+        if ([string]::IsNullOrWhiteSpace($detectedVendor)) {
+            throw "AutoDetect could not map manufacturer '$manufacturer' to a vendor profile. Available vendors: $($availableVendors -join ', ')"
+        }
+
+        $Vendor = $detectedVendor
+        Write-Status -Message "AutoDetect selected vendor '$Vendor' from manufacturer '$manufacturer'." -Level 'Info'
+    }
+
+    if ($availableVendors -notcontains $Vendor) {
+        $vendorList = $availableVendors -join ', '
+        throw "No profile found for vendor '$Vendor'. Available vendors: $vendorList"
+    }
+
+    $script:ResolvedVendor = $Vendor
+    $script:ResolvedCleanupScope = $CleanupScope
+
+    $selectedProfile = $profiles.PSObject.Properties[$Vendor].Value
+
+    if (-not $selectedProfile) {
+        throw "No profile found for vendor '$Vendor'."
+    }
+
+    if ($DryRun) {
+        $WhatIfPreference = $true
+        Write-Status -Message 'Dry run enabled. No changes will be applied.' -Level 'Warn'
+    }
+
+    Write-Status -Message "Starting debloat profile for vendor: $Vendor" -Level 'Info'
+
+    $commonProfile = $null
+    if ($IncludeCommon) {
+        $commonProfile = $profiles.PSObject.Properties['Common'].Value
+
+        if ($null -eq $commonProfile) {
+            Write-Status -Message 'Common profile not found in vendor profile file. Skipping common actions.' -Level 'Warn'
+        }
+        else {
+            Write-Status -Message 'Applying common debloat profile.' -Level 'Info'
+        }
+    }
+
+    switch ($CleanupScope) {
+        'Device' {
+            $script:UserPhaseStatus = 'Skipped'
+            Invoke-DeviceContextCleanup -CommonProfile $commonProfile -SelectedProfile $selectedProfile -IncludeCommonProfile $IncludeCommon
+        }
+        'User' {
+            $script:DevicePhaseStatus = 'Skipped'
+            Invoke-UserContextCleanup -CommonProfile $commonProfile -SelectedProfile $selectedProfile -IncludeCommonProfile $IncludeCommon
+        }
+        default {
+            Invoke-DeviceContextCleanup -CommonProfile $commonProfile -SelectedProfile $selectedProfile -IncludeCommonProfile $IncludeCommon
+            Invoke-UserContextCleanup -CommonProfile $commonProfile -SelectedProfile $selectedProfile -IncludeCommonProfile $IncludeCommon
+        }
+    }
+
+    Write-Status -Message 'Debloat routine complete. A restart is recommended.' -Level 'Success'
+}
+
+try {
+    Invoke-Main
+    $script:ExitCode = $script:ExitCodes.Success
+}
+catch {
+    Write-Status -Message $_.Exception.Message -Level 'Error'
+    $script:ExitCode = Resolve-ExitCode -Exception $_.Exception
+}
+finally {
+    if (-not $script:SkipMarkerWrite) {
+        $runStatus = if ($script:ExitCode -eq $script:ExitCodes.Success) { 'Success' } else { 'Failed' }
+        Write-DetectionMarker -Path $MarkerRegistryPath -Status $runStatus -ExitCode $script:ExitCode -VendorName $script:ResolvedVendor -Scope $script:ResolvedCleanupScope -RunMode $script:RunMode -RunContext $script:RunContext
+    }
+
+    if ($script:TranscriptStarted) {
+        try {
+            Stop-Transcript | Out-Null
+        }
+        catch {
+        }
+    }
+
+    exit $script:ExitCode
+}
