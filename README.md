@@ -41,8 +41,365 @@ All other newly added vendors still use safe empty lists by default, so you can 
 - Applies a small set of safe registry tweaks (only when common profile is included)
 - Disables hibernation (when enabled in Common profile)
 - Disables SSD-often-unneeded services in Common profile (SysMain and Windows Search indexing service)
+- Exports a pre-change safety snapshot on non-dry runs to `C:\Logs\<domain>\Snapshots` (fallback: `C:\Logs\Default\Snapshots`)
 
 ## Run (PowerShell As Administrator)
+
+### Combo pilot-to-RMM workflow
+
+Use one launcher for both pre-deployment validation and production rollout:
+
+```powershell
+# Pilot test in an environment (safe, no changes)
+.\Run-Windows11Debloat-Combo.ps1 -Stage Test -AutoDetect -CleanupScope Device
+
+# Promote to deployment from the same command pattern
+.\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -AutoDetect -CleanupScope Device
+```
+
+How to use in RMM:
+- Pilot ring: run `-Stage Test` first and validate summary/log output.
+- Production ring: switch only `-Stage Deploy` and keep the same vendor/scope arguments.
+- Recurring post-update cleanup: set `-CleanupScope User` for user-context reruns.
+
+### RMM direct commands
+
+Use the combo launcher directly from each platform.
+
+```powershell
+# NinjaOne pilot test (safe preview)
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Test -AutoDetect -IncludeCommon -CleanupScope User
+
+# NinjaOne production deploy
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope User
+
+# Atera pilot test (safe preview)
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Test -AutoDetect -IncludeCommon -CleanupScope User
+
+# Atera production deploy
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope User
+
+# Action1 pilot test (safe preview)
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Test -AutoDetect -IncludeCommon -CleanupScope User
+
+# Action1 production deploy
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope User
+```
+
+Optional vendor force example:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -Vendor Dell -IncludeCommon -CleanupScope Device
+```
+
+Ticket-enabled direct command example:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope User -RecordTicketResult -TicketSystem NinjaOne -TicketRing Ring2 -TicketNotifyEmail helpdesk@contoso.com
+```
+
+### One-command smoke test harness
+
+Run a safe validation pass (Test stage and WhatIf checks only):
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Run-SmokeTests.ps1
+```
+
+Run smoke tests for a specific vendor:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Run-SmokeTests.ps1 -Vendor Dell
+```
+
+Include a real deploy test in the same run (pilot device only):
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Run-SmokeTests.ps1 -IncludeDeployTest
+```
+
+Outputs are written to `TestOutput` as both `.log` and `.json` summary files.
+If the session is not elevated, the harness will mark the WhatIf wording check as `SKIP` and continue.
+
+### Go/No-Go checklist before broad rollout
+
+Use this gate before moving from pilot to broad RMM deployment.
+
+1. Elevation behavior validated
+- Confirm one non-admin run relaunches correctly.
+- Confirm one admin run completes without relaunch.
+
+2. Pilot deploy validated on real devices
+- Run `-Stage Deploy` on 1-3 pilot endpoints.
+- Confirm expected app/service/task changes and no critical business tools removed.
+
+3. Snapshot and marker verification completed
+- Confirm pre-change snapshot file exists under `C:\Logs\<domain>\Snapshots` (fallback: `C:\Logs\Default\Snapshots`).
+- Confirm marker key updates under `HKLM:\SOFTWARE\Windows11Debloat`.
+
+4. Context coverage validated
+- Test at least one SYSTEM-context run (RMM/MDM style).
+- Test at least one user-admin run.
+
+5. Vendor detection sanity checks passed
+- Validate `-AutoDetect` on at least one Dell, Lenovo, and HP endpoint.
+- Confirm unmapped manufacturer behavior is clear and actionable.
+
+6. Logging and exit-code handling verified in RMM
+- Confirm script output is captured in job logs.
+- Confirm non-zero exit codes trigger alerting or remediation workflows.
+
+7. Ring rollout plan confirmed
+- Ring 1: `-Stage Test` only.
+- Ring 2: `-Stage Deploy` for limited subset.
+- Ring 3: Broad deployment after log and ticket review.
+
+Go decision:
+- Proceed only when all checks above are green.
+- If any check fails, hold rollout and remediate before broad deployment.
+
+#### Sign-off template (change ticket)
+
+1. Change ID: ______
+2. Platform: Intune / NinjaOne / Atera / Action1 / Other
+3. Ring: Pilot / Broad
+4. Devices tested: ______
+5. Success rate: ______%
+6. Critical issues found: Yes / No
+7. Snapshot and marker verification: Pass / Fail
+8. Exit-code monitoring configured: Yes / No
+9. Decision: Go / Hold
+10. Approved by: ______
+11. Approval date/time: ______
+
+#### Minimum evidence required for sign-off
+
+1. Pilot execution evidence
+- At least 2 successful pilot run logs from different devices.
+- At least 1 successful `-Stage Test` and 1 successful `-Stage Deploy` result.
+
+2. State verification evidence
+- At least 1 marker verification capture (`HKLM:\SOFTWARE\Windows11Debloat`).
+- At least 1 pre-change snapshot file confirmed in `C:\Logs\<domain>\Snapshots` (or `C:\Logs\Default\Snapshots`).
+
+3. Outcome quality evidence
+- No critical-severity helpdesk incidents attributed to the rollout during pilot window.
+- Documented success rate for pilot devices (target recommendation: >= 95%).
+
+4. Monitoring evidence
+- Non-zero exit code alerting confirmed in the target platform.
+- Named owner on-call for rollback/remediation during first broad wave.
+
+#### How sign-off works in Intune
+
+1. Create ringed device groups (Ring 1 pilot, Ring 2 limited, Ring 3 broad).
+2. Assign `-Stage Test` to Ring 1 and review logs, exit codes, and tickets.
+3. Complete sign-off template and record decision in your change ticket.
+4. Promote to `-Stage Deploy` for Ring 2 only after sign-off.
+5. Promote to Ring 3 after Ring 2 is stable and re-signed off.
+
+#### How sign-off works in other RMM tools
+
+1. Create two jobs/components: Test job (`-Stage Test`) and Deploy job (`-Stage Deploy`).
+2. Run Test job on pilot tags/groups and review outcomes.
+3. Complete sign-off template and approve the deploy wave.
+4. Run Deploy job on next ring.
+5. Keep recurring user cleanup job scheduled with `-CleanupScope User` after update windows.
+
+### Ticketing system guidance (Jira, Atera, and others)
+
+Use this section to standardize change evidence and rollout communication across ticketing platforms.
+
+#### Recommended ticket types
+
+1. Change ticket
+- Purpose: approve Ring 2 and Ring 3 promotion.
+- Created by: endpoint engineering or platform owner.
+
+2. Incident ticket
+- Purpose: track failures from non-zero exit codes or user impact.
+- Created by: RMM/MDM alert rule or helpdesk.
+
+3. Problem ticket
+- Purpose: track repeated failures across devices/vendors.
+- Created by: service owner when incident pattern is recurring.
+
+#### Standard ticket fields to capture
+
+1. Deployment metadata
+- Platform (`Intune`, `NinjaOne`, `Atera`, `Action1`, other)
+- Stage (`Test` or `Deploy`)
+- Cleanup scope (`Device`, `User`, `All`)
+- Vendor mode (`AutoDetect` or forced vendor)
+
+2. Outcome metadata
+- Exit code
+- Marker values from `HKLM:\SOFTWARE\Windows11Debloat`
+- Snapshot path (`C:\Logs\<domain>\Snapshots\PreChange-*.json`)
+- Log path (`C:\Logs\<domain>\*.log`)
+
+3. Approval metadata
+- Ring (`Ring 1`, `Ring 2`, `Ring 3`)
+- Decision (`Go` or `Hold`)
+- Approver and timestamp
+
+#### Jira example
+
+Recommended issue flow:
+1. `Change` issue for rollout approval and ring progression.
+2. Linked `Incident` issues for failures.
+3. Linked `Problem` issue if failure pattern repeats.
+
+Suggested custom fields in Jira:
+- `DeploymentStage`
+- `CleanupScope`
+- `ExitCode`
+- `MarkerStatus`
+- `SnapshotPath`
+- `Ring`
+
+Jira REST ticket creation example:
+
+```powershell
+$jiraBody = @{
+	fields = @{
+		project = @{ key = 'ITOPS' }
+		summary = 'Windows11Debloat failure on endpoint'
+		issuetype = @{ name = 'Incident' }
+		description = @{
+			type = 'doc'
+			version = 1
+			content = @(
+				@{
+					type = 'paragraph'
+					content = @(
+						@{ type = 'text'; text = 'ExitCode: 10, Stage: Deploy, Scope: User, Device: LAPTOP-1234' }
+					)
+				}
+			)
+		}
+	}
+}
+
+$pair = 'admin@contoso.com:YOUR_JIRA_API_TOKEN'
+$auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
+
+Invoke-RestMethod -Method Post `
+	-Uri 'https://yourtenant.atlassian.net/rest/api/3/issue' `
+	-Headers @{ Authorization = "Basic $auth"; Accept = 'application/json'; 'Content-Type' = 'application/json' } `
+	-Body ($jiraBody | ConvertTo-Json -Depth 10)
+```
+
+Ticketing setup helper script:
+- `Ticketing-Setup.ps1` lets you set ticketing system name and notification email once, then create tickets consistently.
+- Supported systems: `Jira`, `Atera`, `NinjaRMM`, `NinjaOne`, `ServiceNow`, `Freshservice`, `Zendesk`, `ManageEngineSDP`, `ConnectWiseManage`, `AutotaskPSA`, `HaloITSM`, `Other`.
+
+Ticket wrapper script is available under `wrappers\ticketing\`:
+- `Create-TicketEvent.ps1` (single entrypoint for all supported systems via `-SystemName`)
+
+Setup examples:
+
+```powershell
+# Jira setup
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Ticketing-Setup.ps1 -Action Setup -SystemName Jira -NotifyEmail helpdesk@contoso.com -JiraBaseUrl https://yourtenant.atlassian.net -JiraProjectKey ITOPS -JiraIssueType Incident -JiraUserEmail admin@contoso.com -JiraApiToken YOUR_JIRA_API_TOKEN
+
+# Atera setup
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Ticketing-Setup.ps1 -Action Setup -SystemName Atera -NotifyEmail helpdesk@contoso.com
+
+# NinjaRMM setup
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Ticketing-Setup.ps1 -Action Setup -SystemName NinjaRMM -NotifyEmail helpdesk@contoso.com
+
+# ServiceNow setup
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Ticketing-Setup.ps1 -Action Setup -SystemName ServiceNow -NotifyEmail helpdesk@contoso.com
+```
+
+Create ticket/event examples:
+
+```powershell
+# Single entrypoint (recommended)
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\wrappers\ticketing\Create-TicketEvent.ps1 -SystemName ServiceNow -Summary "Windows11Debloat event" -DeviceName LAPTOP-1234 -Stage Deploy -CleanupScope User -ExitCode 10 -Ring Ring2
+
+# Jira issue creation
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Ticketing-Setup.ps1 -Action CreateTicket -Summary "Windows11Debloat failed on LAPTOP-1234" -Description "Automated deployment failure" -DeviceName LAPTOP-1234 -Stage Deploy -CleanupScope User -ExitCode 10 -Ring Ring2
+
+# Atera/NinjaRMM payload generation for your native ticket action
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Ticketing-Setup.ps1 -Action CreateTicket -SystemName Atera -Summary "Windows11Debloat event" -DeviceName LAPTOP-1234 -Stage Test -CleanupScope Device -ExitCode 0 -Ring Ring1
+
+# Example wrapper usage (HaloITSM)
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\wrappers\ticketing\Create-TicketEvent.ps1 -SystemName HaloITSM -Summary "Windows11Debloat event" -DeviceName LAPTOP-1234 -Stage Deploy -CleanupScope User -ExitCode 10 -Ring Ring2
+```
+
+Single-command Intune deployment with ticket result recording:
+
+```powershell
+# Recommended first step: save ticketing settings once
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Ticketing-Setup.ps1 -Action Setup -SystemName Jira -NotifyEmail helpdesk@contoso.com -JiraBaseUrl https://yourtenant.atlassian.net -JiraProjectKey ITOPS -JiraIssueType Incident -JiraUserEmail admin@contoso.com -JiraApiToken YOUR_JIRA_API_TOKEN
+
+# Single Intune command: run debloat and record result ticket/event
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope Device -UseIntuneMode -RecordTicketResult -TicketSystem Jira -TicketRing Ring2
+```
+
+Notes:
+- `-RecordTicketResult` records success/failure details after the debloat run.
+- `-TicketSystem` supports `Jira`, `Atera`, `NinjaRMM`, `NinjaOne`, `ServiceNow`, `Freshservice`, `Zendesk`, `ManageEngineSDP`, `ConnectWiseManage`, `AutotaskPSA`, `HaloITSM`, or `Other`.
+- For Jira, a ticket is created directly when Jira settings are configured.
+- For non-Jira systems, the helper outputs a normalized payload you can pass into that platform's native ticket creation action.
+
+#### Atera example
+
+Recommended flow:
+1. Use automation profile to run script.
+2. Create ticket automatically when exit code is non-zero.
+3. Attach command output and device identity to ticket.
+
+Suggested Atera ticket tags:
+- `windows11debloat`
+- `stage-test` or `stage-deploy`
+- `scope-device` or `scope-user`
+- `vendor-autodetect` or `vendor-forced`
+
+#### Other ITSM systems (quick mapping)
+
+1. ServiceNow
+- Use `Change Request` for rollout gates.
+- Auto-create `Incident` on failed jobs.
+- Store marker and snapshot paths in work notes.
+
+2. Freshservice
+- Use `Change` for ring approvals.
+- Use `Incident` for endpoint failures.
+- Add rollout metadata in custom fields.
+
+3. Zendesk
+- Use a dedicated form for endpoint remediation incidents.
+- Include stage, scope, exit code, and device name.
+
+4. ManageEngine ServiceDesk Plus
+- Use `Change` + `Incident` linkage.
+- Capture run evidence in resolution/worklog sections.
+
+5. ConnectWise Manage / Autotask PSA / HaloITSM
+- Use one change ticket per wave and auto-create incidents from RMM alerts.
+- Require go/no-go evidence fields before approval status change.
+
+#### Suggested ticket note template
+
+```text
+Windows11Debloat rollout update
+Platform: <Intune/NinjaOne/Atera/Action1/...>
+Stage: <Test/Deploy>
+Scope: <Device/User/All>
+Vendor mode: <AutoDetect/Vendor:X>
+Device count: <n>
+Success count: <n>
+Failure count: <n>
+Exit code summary: <codes>
+Marker key status: <value>
+Snapshot sample path: <path>
+Decision: <Go/Hold>
+Approved by: <name>
+Timestamp: <UTC>
+```
 
 ### Quick standalone helpdesk run
 
@@ -121,6 +478,41 @@ When `IntuneMode` runs, it also stages the helpdesk copy locally to:
 
 Staged files include the script, vendor profile JSON, helpdesk launcher, and README.
 
+### Intune single-file bootstrap mode
+
+If you cannot upload the full file set into Intune script deployment, use the single bootstrap script:
+- `Intune-Bootstrap-Windows11Debloat.ps1`
+
+What it does in one call:
+1. Downloads a zip package that contains the full repository files.
+2. Extracts and stages the package locally to `C:\ProgramData\Windows11Debloat`.
+3. Optionally configures ticket settings via `Ticketing-Setup.ps1`.
+4. Runs `Run-Windows11Debloat-Combo.ps1` with your deployment arguments.
+5. Returns the debloat exit code to Intune.
+
+Prepare package source:
+1. Host a zip of this repo in a reachable location (private blob/SAS URL, internal package URL, or release artifact URL).
+2. Use that URL as `-PackageZipUrl`.
+3. Optional but recommended: provide `-PackageZipSha256` to verify download integrity before execution.
+
+Single Intune command example (debloat + ticketing in one call):
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\Intune-Bootstrap-Windows11Debloat.ps1 -PackageZipUrl "https://your-storage.example.com/Windows11Debloat.zip" -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope Device -RecordTicketResult -TicketSystem Jira -TicketNotifyEmail helpdesk@contoso.com -TicketRing Ring2 -JiraBaseUrl https://yourtenant.atlassian.net -JiraProjectKey ITOPS -JiraIssueType Incident -JiraUserEmail admin@contoso.com -JiraApiToken YOUR_JIRA_API_TOKEN
+```
+
+Single Intune command example with SHA-256 verification:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\Intune-Bootstrap-Windows11Debloat.ps1 -PackageZipUrl "https://your-storage.example.com/Windows11Debloat.zip" -PackageZipSha256 "YOUR_PACKAGE_SHA256" -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope Device -RecordTicketResult -TicketSystem Jira -TicketNotifyEmail helpdesk@contoso.com -TicketRing Ring2 -JiraBaseUrl https://yourtenant.atlassian.net -JiraProjectKey ITOPS -JiraIssueType Incident -JiraUserEmail admin@contoso.com -JiraApiToken YOUR_JIRA_API_TOKEN
+```
+
+Notes:
+- This approach avoids requiring all scripts to be embedded directly in the Intune script body.
+- Keep package URLs and Jira tokens protected (prefer secure secret delivery where possible).
+- Use ringed assignments in Intune (`Test` first, then `Deploy`).
+- Generate a package hash with: `Get-FileHash .\Windows11Debloat.zip -Algorithm SHA256`.
+
 ### Cleanup scope split
 
 You can split cleanup into device-context and user-context phases:
@@ -158,6 +550,12 @@ Auto-detect with dry run:
 
 ```powershell
 .\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -DryRun
+```
+
+Quiet dry run (summary only):
+
+```powershell
+.\Windows11Debloat.ps1 -DryRun -HelpdeskMode -QuietDryRun
 ```
 
 ## MDM and RMM Setup

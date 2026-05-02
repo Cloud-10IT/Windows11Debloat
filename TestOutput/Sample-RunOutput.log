@@ -1,0 +1,49 @@
+==============================
+Windows11Debloat Sample Output
+==============================
+
+Scenario A: Pilot Test (Stage Test)
+Command:
+  .\Run-Windows11Debloat-Combo.ps1 -Stage Test -AutoDetect -CleanupScope Device
+
+Expected style of output:
+[INFO] Stage: Test
+[INFO] Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device -HelpdeskMode -DryRun -QuietDryRun
+[INFO] Helpdesk mode enabled. Defaulting to quick standalone remediation behavior.
+[INFO] [WhatIf] Would start transcript logging to: C:\Logs\AzureAD\Helpdesk-20260501-201000.log
+[INFO] AutoDetect selected vendor 'Dell' from manufacturer 'Dell Inc.'.
+[WARN] Dry run enabled. No changes will be applied.
+[INFO] Quiet dry run enabled. Item-by-item preview output will be suppressed.
+[INFO] Starting debloat profile for vendor: Dell
+[INFO] Applying common debloat profile.
+[INFO] Starting device-context cleanup phase.
+[OK] Completed device-context cleanup phase.
+[INFO] Dry-run summary:
+[INFO]   Appx patterns: 42
+[INFO]   Winget entries: 0
+[INFO]   Services: 6
+[INFO]   Scheduled tasks: 5
+[INFO]   Registry tweaks: 1
+[INFO]   Hibernation actions: 1
+[INFO]   OneDrive actions: 0
+[OK] Debloat routine complete. A restart is recommended.
+[INFO] Exit code: 0
+
+Scenario B: Production Deploy (Stage Deploy)
+Command:
+  .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -AutoDetect -CleanupScope Device
+
+Expected style of output:
+[INFO] Stage: Deploy
+[INFO] Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device -HelpdeskMode
+[INFO] Helpdesk mode enabled. Defaulting to quick standalone remediation behavior.
+[INFO] Transcript logging to: C:\Logs\AzureAD\Helpdesk-20260501-201500.log
+[INFO] AutoDetect selected vendor 'Dell' from manufacturer 'Dell Inc.'.
+[INFO] Starting debloat profile for vendor: Dell
+[INFO] Applying common debloat profile.
+[INFO] Pre-change snapshot written to: C:\Logs\AzureAD\Snapshots\PreChange-Dell-20260501-201503.json
+[INFO] Starting device-context cleanup phase.
+[OK] Completed device-context cleanup phase.
+[OK] Debloat routine complete. A restart is recommended.
+[INFO] Updated marker registry key: HKLM:\SOFTWARE\Windows11Debloat
+[INFO] Exit code: 0

@@ -7,13 +7,16 @@ param(
     [switch]$AutoDetect,
 
     [Parameter(Mandatory = $false)]
-    [string]$ProfilesPath = (Join-Path -Path $PSScriptRoot -ChildPath 'vendor-profiles.json'),
+    [string]$ProfilesPath,
 
     [Parameter(Mandatory = $false)]
     [switch]$IncludeCommon,
 
     [Parameter(Mandatory = $false)]
     [switch]$DryRun,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$QuietDryRun,
 
     [Parameter(Mandatory = $false)]
     [switch]$IntuneMode,
@@ -49,6 +52,19 @@ $script:DevicePhaseStatus = 'Pending'
 $script:UserPhaseStatus = 'Pending'
 $script:ResolvedVendor = $Vendor
 $script:ResolvedCleanupScope = $CleanupScope
+$script:ScriptRoot = $null
+$script:AllUsersAppxPackages = $null
+$script:ProvisionedAppxPackages = $null
+$script:IsDryRun = $false
+$script:DryRunSummary = @{
+    Appx = 0
+    Winget = 0
+    Services = 0
+    ScheduledTasks = 0
+    RegistryTweaks = 0
+    Hibernation = 0
+    OneDrive = 0
+}
 $script:ExitCodes = @{
     Success = 0
     ElevationRequired = 10
@@ -138,6 +154,11 @@ function Start-RunTranscript {
     $safeModeName = ($ModeName -replace '[^a-zA-Z0-9_-]', '-')
     $logPath = Join-Path -Path $logRoot -ChildPath "$safeModeName-$timestamp.log"
 
+    if ($WhatIfPreference) {
+        Write-Status -Message "[WhatIf] Would start transcript logging to: $logPath" -Level 'Info'
+        return
+    }
+
     Start-Transcript -Path $logPath -Force | Out-Null
     $script:TranscriptStarted = $true
     Write-Status -Message "Transcript logging to: $logPath" -Level 'Info'
@@ -176,6 +197,18 @@ function Get-LogRootPath {
 
     $safeDomainName = $domainName -replace '[\\/:*?"<>|]', '-'
     return (Join-Path -Path $BasePath -ChildPath $safeDomainName)
+}
+
+function Resolve-ScriptRootPath {
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        return $PSScriptRoot
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        return (Split-Path -Path $PSCommandPath -Parent)
+    }
+
+    return (Get-Location).Path
 }
 
 function Get-DomainScopedPath {
@@ -221,6 +254,30 @@ function Write-Status {
         'Error'   { Write-Host "[ERROR] $Message" -ForegroundColor Red }
         'Success' { Write-Host "[OK] $Message" -ForegroundColor Green }
     }
+}
+
+function Add-DryRunCount {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Appx', 'Winget', 'Services', 'ScheduledTasks', 'RegistryTweaks', 'Hibernation', 'OneDrive')]
+        [string]$Category,
+
+        [Parameter(Mandatory = $false)]
+        [int]$Count = 1
+    )
+
+    $script:DryRunSummary[$Category] += $Count
+}
+
+function Write-DryRunSummary {
+    Write-Status -Message 'Dry-run summary:' -Level 'Info'
+    Write-Status -Message "  Appx patterns: $($script:DryRunSummary.Appx)" -Level 'Info'
+    Write-Status -Message "  Winget entries: $($script:DryRunSummary.Winget)" -Level 'Info'
+    Write-Status -Message "  Services: $($script:DryRunSummary.Services)" -Level 'Info'
+    Write-Status -Message "  Scheduled tasks: $($script:DryRunSummary.ScheduledTasks)" -Level 'Info'
+    Write-Status -Message "  Registry tweaks: $($script:DryRunSummary.RegistryTweaks)" -Level 'Info'
+    Write-Status -Message "  Hibernation actions: $($script:DryRunSummary.Hibernation)" -Level 'Info'
+    Write-Status -Message "  OneDrive actions: $($script:DryRunSummary.OneDrive)" -Level 'Info'
 }
 
 function Copy-HelpdeskArtifacts {
@@ -296,11 +353,28 @@ function Get-StringListProperty {
         return @()
     }
 
-    if ($property.Value -is [System.Array]) {
-        return [string[]]$property.Value
+    $values = if ($property.Value -is [System.Array]) {
+        [string[]]$property.Value
+    }
+    else {
+        @([string]$property.Value)
     }
 
-    return @([string]$property.Value)
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $deduped = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($value in $values) {
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            continue
+        }
+
+        $normalized = $value.Trim()
+        if ($seen.Add($normalized)) {
+            $deduped.Add($normalized)
+        }
+    }
+
+    return $deduped.ToArray()
 }
 
 function Get-ArrayProperty {
@@ -429,22 +503,50 @@ function Remove-AppxByName {
         [string[]]$Names
     )
 
+    if ($script:IsDryRun -or $WhatIfPreference) {
+        Add-DryRunCount -Category 'Appx' -Count $Names.Count
+
+        if ($QuietDryRun) {
+            return
+        }
+
+        foreach ($name in $Names) {
+            Write-Status -Message "[DryRun] Would remove Appx package pattern: $name" -Level 'Info'
+        }
+        return
+    }
+
+    if ($null -eq $script:AllUsersAppxPackages) {
+        $script:AllUsersAppxPackages = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue
+    }
+
+    if ($null -eq $script:ProvisionedAppxPackages) {
+        $script:ProvisionedAppxPackages = Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue
+    }
+
     foreach ($name in $Names) {
         try {
-            $packages = Get-AppxPackage -AllUsers -Name $name -ErrorAction SilentlyContinue
-            if (-not $packages) {
-                Write-Status -Message "Appx package not found: $name" -Level 'Warn'
-                continue
+            $matchPattern = if ($name -match '[\*\?]') { $name } else { "$name*" }
+
+            $packages = $script:AllUsersAppxPackages | Where-Object {
+                $_.Name -like $matchPattern -or $_.PackageFullName -like $matchPattern
             }
 
-            foreach ($pkg in $packages) {
+            if (-not $packages) {
+                Write-Status -Message "Appx package not found: $name" -Level 'Warn'
+            }
+
+            foreach ($pkg in @($packages)) {
                 if ($PSCmdlet.ShouldProcess($pkg.PackageFullName, 'Remove-AppxPackage -AllUsers')) {
                     Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
                 }
             }
 
-            $provisioned = Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like "$name*" }
-            foreach ($prov in $provisioned) {
+            $provisioned = $script:ProvisionedAppxPackages | Where-Object {
+                $_.DisplayName -like $matchPattern -or $_.PackageName -like $matchPattern
+            }
+
+            foreach ($prov in @($provisioned)) {
                 if ($PSCmdlet.ShouldProcess($prov.PackageName, 'Remove-AppxProvisionedPackage -Online')) {
                     Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction Stop | Out-Null
                 }
@@ -469,6 +571,19 @@ function Uninstall-WingetPackages {
         Write-Status -Message 'winget is not available. Skipping winget package removals.' -Level 'Warn'
         if ($script:IsSystemContext) {
             Write-Status -Message 'This is common in Intune/SYSTEM context on a new machine. Appx removals can still proceed, but winget-managed removals may need a user-context pass later.' -Level 'Info'
+        }
+        return
+    }
+
+    if ($script:IsDryRun -or $WhatIfPreference) {
+        Add-DryRunCount -Category 'Winget' -Count $Ids.Count
+
+        if ($QuietDryRun) {
+            return
+        }
+
+        foreach ($id in $Ids) {
+            Write-Status -Message "[DryRun] Would uninstall winget package: $id" -Level 'Info'
         }
         return
     }
@@ -511,6 +626,18 @@ function Disable-ServicesSafe {
         [string[]]$ServiceNames
     )
 
+    if ($script:IsDryRun -or $WhatIfPreference) {
+        Add-DryRunCount -Category 'Services' -Count $ServiceNames.Count
+
+        if (-not $QuietDryRun) {
+            foreach ($serviceName in $ServiceNames) {
+                Write-Status -Message "[DryRun] Would disable service: $serviceName" -Level 'Info'
+            }
+        }
+
+        return
+    }
+
     foreach ($serviceName in $ServiceNames) {
         $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
         if (-not $service) {
@@ -543,6 +670,14 @@ function Set-HibernationState {
     )
 
     $targetState = if ($Enabled) { 'on' } else { 'off' }
+
+    if ($script:IsDryRun -or $WhatIfPreference) {
+        Add-DryRunCount -Category 'Hibernation'
+        if (-not $QuietDryRun) {
+            Write-Status -Message "[DryRun] Would set hibernation state to: $targetState" -Level 'Info'
+        }
+        return
+    }
 
     try {
         if ($PSCmdlet.ShouldProcess("Hibernate ($targetState)", "powercfg /hibernate $targetState")) {
@@ -620,7 +755,12 @@ function Invoke-OneDriveCorpCleanup {
         return
     }
 
-    Write-Status -Message 'OneDrive for Business detected. Removing consumer OneDrive.' -Level 'Info'
+    if ($script:IsDryRun -or $WhatIfPreference) {
+        Write-Status -Message 'OneDrive for Business detected. Would remove consumer OneDrive.' -Level 'Info'
+    }
+    else {
+        Write-Status -Message 'OneDrive for Business detected. Removing consumer OneDrive.' -Level 'Info'
+    }
 
     $oneDriveSetup = Join-Path -Path $env:SystemRoot -ChildPath 'SysWOW64\OneDriveSetup.exe'
     if (-not (Test-Path -Path $oneDriveSetup)) {
@@ -628,6 +768,14 @@ function Invoke-OneDriveCorpCleanup {
     }
 
     if (Test-Path -Path $oneDriveSetup) {
+        if ($script:IsDryRun -or $WhatIfPreference) {
+            Add-DryRunCount -Category 'OneDrive'
+            if (-not $QuietDryRun) {
+                Write-Status -Message "[DryRun] Would uninstall consumer OneDrive via: $oneDriveSetup /uninstall" -Level 'Info'
+            }
+            return
+        }
+
         try {
             if ($PSCmdlet.ShouldProcess('Consumer OneDrive', "$oneDriveSetup /uninstall")) {
                 & $oneDriveSetup /uninstall | Out-Null
@@ -639,6 +787,14 @@ function Invoke-OneDriveCorpCleanup {
         }
     }
     elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+        if ($script:IsDryRun -or $WhatIfPreference) {
+            Add-DryRunCount -Category 'OneDrive'
+            if (-not $QuietDryRun) {
+                Write-Status -Message '[DryRun] Would uninstall consumer OneDrive via winget.' -Level 'Info'
+            }
+            return
+        }
+
         try {
             if ($PSCmdlet.ShouldProcess('Microsoft.OneDrive', 'winget uninstall')) {
                 winget uninstall --id 'Microsoft.OneDrive' --silent --accept-source-agreements | Out-Null
@@ -660,6 +816,18 @@ function Disable-ScheduledTasksSafe {
         [Parameter(Mandatory = $true)]
         [string[]]$TaskPaths
     )
+
+    if ($script:IsDryRun -or $WhatIfPreference) {
+        Add-DryRunCount -Category 'ScheduledTasks' -Count $TaskPaths.Count
+
+        if (-not $QuietDryRun) {
+            foreach ($taskPath in $TaskPaths) {
+                Write-Status -Message "[DryRun] Would disable scheduled task: $taskPath" -Level 'Info'
+            }
+        }
+
+        return
+    }
 
     foreach ($taskPath in $TaskPaths) {
         $normalized = $taskPath.TrimStart('\\')
@@ -698,6 +866,22 @@ function Set-RegistryTweaks {
         [Parameter(Mandatory = $true)]
         [array]$Tweaks
     )
+
+    if ($script:IsDryRun -or $WhatIfPreference) {
+        Add-DryRunCount -Category 'RegistryTweaks' -Count $Tweaks.Count
+
+        if (-not $QuietDryRun) {
+            foreach ($tweak in $Tweaks) {
+                $path = $tweak.Path
+                $name = $tweak.Name
+                $type = $tweak.Type
+                $value = $tweak.Value
+                Write-Status -Message "[DryRun] Would apply registry tweak: $path\\$name = $value ($type)" -Level 'Info'
+            }
+        }
+
+        return
+    }
 
     foreach ($tweak in $Tweaks) {
         try {
@@ -772,10 +956,145 @@ function Write-DetectionMarker {
             New-ItemProperty -Path $Path -Name $value.Name -Value $value.Value -PropertyType $value.Type -Force | Out-Null
         }
 
-        Write-Status -Message "Updated marker registry key: $Path" -Level 'Info'
+        if ($WhatIfPreference) {
+            Write-Status -Message "[WhatIf] Would update marker registry key: $Path" -Level 'Info'
+        }
+        else {
+            Write-Status -Message "Updated marker registry key: $Path" -Level 'Info'
+        }
     }
     catch {
         Write-Status -Message "Failed to update marker registry key '$Path'. $($_.Exception.Message)" -Level 'Warn'
+    }
+}
+
+function Export-PreChangeSnapshot {
+    param(
+        [Parameter(Mandatory = $false)]
+        [object]$CommonProfile,
+
+        [Parameter(Mandatory = $true)]
+        [object]$SelectedProfile,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$IncludeCommonProfile,
+
+        [Parameter(Mandatory = $true)]
+        [string]$MarkerPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LogRootBasePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$VendorName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Scope,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RunMode
+    )
+
+    try {
+        $snapshotRoot = Get-DomainScopedPath -BasePath $LogRootBasePath -ChildPath 'Snapshots'
+        if (-not (Test-Path -Path $snapshotRoot)) {
+            New-Item -Path $snapshotRoot -ItemType Directory -Force | Out-Null
+        }
+
+        $serviceNames = [System.Collections.Generic.List[string]]::new()
+        $taskPaths = [System.Collections.Generic.List[string]]::new()
+
+        if ($IncludeCommonProfile -and $null -ne $CommonProfile) {
+            foreach ($name in (Get-StringListProperty -InputObject $CommonProfile -PropertyName 'DisableServices')) {
+                $serviceNames.Add($name)
+            }
+            foreach ($taskPath in (Get-StringListProperty -InputObject $CommonProfile -PropertyName 'DisableScheduledTasks')) {
+                $taskPaths.Add($taskPath)
+            }
+        }
+
+        foreach ($name in (Get-StringListProperty -InputObject $SelectedProfile -PropertyName 'Services')) {
+            $serviceNames.Add($name)
+        }
+        foreach ($taskPath in (Get-StringListProperty -InputObject $SelectedProfile -PropertyName 'ScheduledTasks')) {
+            $taskPaths.Add($taskPath)
+        }
+
+        $uniqueServiceNames = $serviceNames.ToArray() | Select-Object -Unique
+        $uniqueTaskPaths = $taskPaths.ToArray() | Select-Object -Unique
+
+        $serviceState = foreach ($serviceName in $uniqueServiceNames) {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -eq $service) {
+                [pscustomobject]@{
+                    Name = $serviceName
+                    Exists = $false
+                    Status = $null
+                    StartType = $null
+                }
+                continue
+            }
+
+            [pscustomobject]@{
+                Name = $serviceName
+                Exists = $true
+                Status = [string]$service.Status
+                StartType = [string]$service.StartType
+            }
+        }
+
+        $taskState = foreach ($taskPath in $uniqueTaskPaths) {
+            $normalized = $taskPath.TrimStart('\\')
+            $parts = $normalized -split '\\'
+
+            if ($parts.Count -lt 2) {
+                [pscustomobject]@{
+                    TaskPath = $taskPath
+                    Exists = $false
+                    State = 'InvalidPath'
+                }
+                continue
+            }
+
+            $taskName = $parts[-1]
+            $taskFolder = '\\' + (($parts[0..($parts.Count - 2)] -join '\\')) + '\\'
+            $task = Get-ScheduledTask -TaskPath $taskFolder -TaskName $taskName -ErrorAction SilentlyContinue
+
+            [pscustomobject]@{
+                TaskPath = $taskPath
+                Exists = ($null -ne $task)
+                State = if ($null -ne $task) { [string]$task.State } else { 'NotFound' }
+            }
+        }
+
+        $markerState = $null
+        if (Test-Path -Path $MarkerPath) {
+            $markerState = Get-ItemProperty -Path $MarkerPath -ErrorAction SilentlyContinue |
+                Select-Object * -ExcludeProperty PSPath, PSParentPath, PSChildName, PSDrive, PSProvider
+        }
+
+        $snapshot = [pscustomobject]@{
+            TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
+            Vendor = $VendorName
+            CleanupScope = $Scope
+            RunMode = $RunMode
+            ServiceState = $serviceState
+            ScheduledTaskState = $taskState
+            MarkerState = $markerState
+        }
+
+        $snapshotPath = Join-Path -Path $snapshotRoot -ChildPath ("PreChange-{0}-{1}.json" -f $VendorName, (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        $snapshot | ConvertTo-Json -Depth 8 | Set-Content -Path $snapshotPath -Encoding UTF8
+
+        if ($WhatIfPreference) {
+            Write-Status -Message "[WhatIf] Would write pre-change snapshot to: $snapshotPath" -Level 'Info'
+        }
+        else {
+            Write-Status -Message "Pre-change snapshot written to: $snapshotPath" -Level 'Info'
+        }
+    }
+    catch {
+        Write-Status -Message "Failed to create pre-change snapshot. $($_.Exception.Message)" -Level 'Warn'
     }
 }
 
@@ -877,6 +1196,12 @@ function Invoke-UserContextCleanup {
 }
 
 function Invoke-Main {
+    $script:ScriptRoot = Resolve-ScriptRootPath
+
+    if ([string]::IsNullOrWhiteSpace($ProfilesPath)) {
+        $ProfilesPath = Join-Path -Path $script:ScriptRoot -ChildPath 'vendor-profiles.json'
+    }
+
     if (-not (Test-IsAdministrator)) {
         if ($HelpdeskMode -and -not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
             Write-Host '[INFO] Helpdesk mode requested without elevation. Relaunching as Administrator...'
@@ -905,9 +1230,9 @@ function Invoke-Main {
             Write-Status -Message 'Intune mode is intended for SYSTEM context, but the current session is not running as SYSTEM.' -Level 'Warn'
         }
 
-        if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        if (-not [string]::IsNullOrWhiteSpace($script:ScriptRoot)) {
             $scriptCachePath = Get-DomainScopedPath -BasePath $ScriptCacheBasePath -ChildPath 'Scripts'
-            Copy-HelpdeskArtifacts -SourceRoot $PSScriptRoot -DestinationRoot $scriptCachePath
+            Copy-HelpdeskArtifacts -SourceRoot $script:ScriptRoot -DestinationRoot $scriptCachePath
         }
     }
     elseif ($HelpdeskMode) {
@@ -974,8 +1299,12 @@ function Invoke-Main {
     }
 
     if ($DryRun) {
-        $WhatIfPreference = $true
+        $script:IsDryRun = $true
         Write-Status -Message 'Dry run enabled. No changes will be applied.' -Level 'Warn'
+
+        if ($QuietDryRun) {
+            Write-Status -Message 'Quiet dry run enabled. Item-by-item preview output will be suppressed.' -Level 'Info'
+        }
     }
 
     Write-Status -Message "Starting debloat profile for vendor: $Vendor" -Level 'Info'
@@ -990,6 +1319,10 @@ function Invoke-Main {
         else {
             Write-Status -Message 'Applying common debloat profile.' -Level 'Info'
         }
+    }
+
+    if (-not $script:IsDryRun) {
+        Export-PreChangeSnapshot -CommonProfile $commonProfile -SelectedProfile $selectedProfile -IncludeCommonProfile $IncludeCommon -MarkerPath $MarkerRegistryPath -LogRootBasePath $LogBasePath -VendorName $Vendor -Scope $CleanupScope -RunMode $script:RunMode
     }
 
     switch ($CleanupScope) {
@@ -1007,6 +1340,10 @@ function Invoke-Main {
         }
     }
 
+    if ($script:IsDryRun -and $QuietDryRun) {
+        Write-DryRunSummary
+    }
+
     Write-Status -Message 'Debloat routine complete. A restart is recommended.' -Level 'Success'
 }
 
@@ -1019,7 +1356,7 @@ catch {
     $script:ExitCode = Resolve-ExitCode -Exception $_.Exception
 }
 finally {
-    if (-not $script:SkipMarkerWrite) {
+    if (-not $script:SkipMarkerWrite -and -not $script:IsDryRun) {
         $runStatus = if ($script:ExitCode -eq $script:ExitCodes.Success) { 'Success' } else { 'Failed' }
         Write-DetectionMarker -Path $MarkerRegistryPath -Status $runStatus -ExitCode $script:ExitCode -VendorName $script:ResolvedVendor -Scope $script:ResolvedCleanupScope -RunMode $script:RunMode -RunContext $script:RunContext
     }
