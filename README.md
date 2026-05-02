@@ -478,6 +478,19 @@ When `IntuneMode` runs, it also stages the helpdesk copy locally to:
 
 Staged files include the script, vendor profile JSON, helpdesk launcher, and README.
 
+### Upload-time parameter checklist (Intune + RMM)
+
+Before uploading scripts into any RMM or Intune policy, edit these files first:
+
+| File | Upload target | What to edit before upload |
+|---|---|---|
+| `Intune-Bootstrap-Windows11Debloat.ps1` | Intune Platform scripts | `$IntuneDefaults` block (URL, hash, stage, scope, vendor mode, ticket settings) |
+| `Intune-Detection-Windows11Debloat.ps1` | Intune Remediations (Detection) | `$MaxAgeDays` and optional `$MarkerPath` |
+| `Intune-Remediation-Windows11Debloat.ps1` | Intune Remediations (Remediation) | `$IntuneRemediationDefaults` block (URL, stage, scope, vendor mode, ticket + Jira settings) |
+| `Run-Windows11Debloat-Combo.ps1` | NinjaOne/Atera/Action1/other RMM script jobs | `$RmmDefaults` block (stage, scope, vendor mode, ticket settings) |
+
+All four scripts now print effective runtime settings in logs so helpdesk can confirm exactly what policy values were used.
+
 ### Intune single-file bootstrap mode — upload one file, all scripts auto-created on device
 
 #### Fast Intune quick start (recommended)

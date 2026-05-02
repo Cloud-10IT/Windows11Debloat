@@ -1,11 +1,21 @@
-# Intune Remediations — Detection Script
-# Used in: Devices > Scripts and remediations > Remediations > [your policy] > Detection script
+# ============================================================================
+# Intune-Detection-Windows11Debloat.ps1
+# PURPOSE : Detection script for Intune Remediations — checks whether the
+#           debloat has run successfully within the allowed age window.
+# EDIT     : Find the EDIT BEFORE UPLOAD block below and adjust values
+#            before uploading to Devices > Scripts and remediations > Remediations.
+# ============================================================================
 #
 # Logic:
 #   EXIT 0  = COMPLIANT   (script ran successfully within the last 30 days) — no remediation triggered
 #   EXIT 1  = NON-COMPLIANT (never ran, failed, or older than 30 days)      — remediation triggered
 #
-# Adjust $MaxAgeDays to match your re-run cadence (default: 30 days).
+# ============================================================================
+# EDIT BEFORE UPLOAD TO INTUNE
+# Adjust values below for your detection cadence.
+# ============================================================================
+# Marker registry path example: 'HKLM:\SOFTWARE\Windows11Debloat'
+# MaxAgeDays examples: 30 (monthly), 7 (weekly), 90 (quarterly)
 
 $MarkerPath = 'HKLM:\SOFTWARE\Windows11Debloat'
 $MaxAgeDays = 30
