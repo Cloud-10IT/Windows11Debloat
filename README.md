@@ -478,40 +478,155 @@ When `IntuneMode` runs, it also stages the helpdesk copy locally to:
 
 Staged files include the script, vendor profile JSON, helpdesk launcher, and README.
 
-### Intune single-file bootstrap mode
+### Intune single-file bootstrap mode — upload one file, all scripts auto-created on device
 
-If you cannot upload the full file set into Intune script deployment, use the single bootstrap script:
-- `Intune-Bootstrap-Windows11Debloat.ps1`
+Upload only **`Intune-Bootstrap-Windows11Debloat.ps1`** to Intune.
+When the policy runs on a device, the script downloads your hosted zip, extracts all repository files,
+and stages them to `C:\ProgramData\Windows11Debloat` automatically — no manual file copy is needed.
 
-What it does in one call:
-1. Downloads a zip package that contains the full repository files.
-2. Extracts and stages the package locally to `C:\ProgramData\Windows11Debloat`.
-3. Optionally configures ticket settings via `Ticketing-Setup.ps1`.
-4. Runs `Run-Windows11Debloat-Combo.ps1` with your deployment arguments.
-5. Returns the debloat exit code to Intune.
+#### Step 1 — Host the package zip
 
-Prepare package source:
-1. Host a zip of this repo in a reachable location (private blob/SAS URL, internal package URL, or release artifact URL).
-2. Use that URL as `-PackageZipUrl`.
-3. Optional but recommended: provide `-PackageZipSha256` to verify download integrity before execution.
+Zip the contents of this repository and upload it to an accessible location:
 
-Single Intune command example (debloat + ticketing in one call):
+- Azure Blob Storage with a SAS URL (recommended for security)
+- Internal web server or SharePoint direct-download URL
+- GitHub Releases asset URL
+
+Note the final URL — you will embed it as `-PackageZipUrl` before uploading to Intune.
+Optional but strongly recommended: generate a SHA-256 hash for integrity verification:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File .\Intune-Bootstrap-Windows11Debloat.ps1 -PackageZipUrl "https://your-storage.example.com/Windows11Debloat.zip" -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope Device -RecordTicketResult -TicketSystem Jira -TicketNotifyEmail helpdesk@contoso.com -TicketRing Ring2 -JiraBaseUrl https://yourtenant.atlassian.net -JiraProjectKey ITOPS -JiraIssueType Incident -JiraUserEmail admin@contoso.com -JiraApiToken YOUR_JIRA_API_TOKEN
+Get-FileHash .\Windows11Debloat.zip -Algorithm SHA256
 ```
 
-Single Intune command example with SHA-256 verification:
+#### Step 2 — Prepare the bootstrap script
+
+Before uploading to Intune, open `Intune-Bootstrap-Windows11Debloat.ps1` and set your
+`-PackageZipUrl` (and optionally `-PackageZipSha256`) as the default parameter values,
+since Intune Platform scripts do not support passing arguments to uploaded scripts.
+
+Key parameters to configure for your environment:
+
+| Parameter | What to set |
+|---|---|
+| `-PackageZipUrl` | Your hosted zip URL from Step 1 |
+| `-PackageZipSha256` | Your SHA-256 hash (optional, recommended) |
+| `-Stage` | `Deploy` for production; `Test` for pilot ring (dry run) |
+| `-AutoDetect` | Include — auto-detects Dell / Lenovo / HP / etc. |
+| `-IncludeCommon` | Include — removes common cross-vendor bloatware |
+| `-RecordTicketResult` + `-TicketSystem` | Include if you want an ITSM ticket per device run |
+
+#### Step 3 — Upload to Devices > Scripts and remediations
+
+Navigate to **Devices > Scripts and remediations > Platform scripts > Add > Windows 10 and later**.
+
+On the **Script settings** tab configure the following:
+
+| Field | Value | Reason |
+|---|---|---|
+| **Script location** | Upload `Intune-Bootstrap-Windows11Debloat.ps1` | This is the only file Intune needs |
+| **Run this script using the logged on credentials** | **No** | Must run as SYSTEM to remove apps, write HKLM, change services |
+| **Enforce script signature check** | **No** | Script is not code-signed; Yes would block execution |
+| **Run script in 64-bit PowerShell Host** | **Yes** | Required for correct HKLM registry paths and WMI vendor detection |
+
+In **Assignments** scope the policy to your device groups. Use rings:
+- Pilot group first with `-Stage Test` (dry run, no real changes)
+- Broad group after sign-off with `-Stage Deploy`
+
+> **Note:** Platform scripts run **once** per device on policy assignment. Use this for initial provisioning.
+> For monthly automatic re-runs (drift correction), use the Remediations blade described below.
+
+#### What gets created on the device automatically
+
+When Intune runs the bootstrap, no further helpdesk action is needed:
+
+1. Downloads and verifies the package zip
+2. Extracts and stages **all repository files** to `C:\ProgramData\Windows11Debloat\`
+3. Configures ticketing if `-RecordTicketResult` is set
+4. Runs the debloat combo and writes the result marker to `HKLM:\SOFTWARE\Windows11Debloat`
+5. Writes a transcript log to `C:\Logs\<domain>\` (fallback: `C:\Logs\Default\`)
+
+A helpdesk technician remoting to the device afterwards can find everything here:
+
+| What | Path |
+|---|---|
+| All scripts | `C:\ProgramData\Windows11Debloat\` |
+| Core debloat script | `C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1` |
+| One-click helpdesk launcher | `C:\ProgramData\Windows11Debloat\Run-Windows11Debloat-Helpdesk.cmd` |
+| Vendor profiles | `C:\ProgramData\Windows11Debloat\vendor-profiles.json` |
+| Run logs | `C:\Logs\<domain>\` or `C:\Logs\Default\` |
+
+To re-run from a remote session:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File .\Intune-Bootstrap-Windows11Debloat.ps1 -PackageZipUrl "https://your-storage.example.com/Windows11Debloat.zip" -PackageZipSha256 "YOUR_PACKAGE_SHA256" -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope Device -RecordTicketResult -TicketSystem Jira -TicketNotifyEmail helpdesk@contoso.com -TicketRing Ring2 -JiraBaseUrl https://yourtenant.atlassian.net -JiraProjectKey ITOPS -JiraIssueType Incident -JiraUserEmail admin@contoso.com -JiraApiToken YOUR_JIRA_API_TOKEN
+cd C:\ProgramData\Windows11Debloat
+
+# One-click re-run (helpdesk mode):
+.\Run-Windows11Debloat-Helpdesk.cmd
+
+# Full deploy run:
+powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 `
+    -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope Device -UseIntuneMode
 ```
 
-Notes:
-- This approach avoids requiring all scripts to be embedded directly in the Intune script body.
-- Keep package URLs and Jira tokens protected (prefer secure secret delivery where possible).
-- Use ringed assignments in Intune (`Test` first, then `Deploy`).
-- Generate a package hash with: `Get-FileHash .\Windows11Debloat.zip -Algorithm SHA256`.
+---
+
+### Intune monthly re-run — Remediations blade
+
+Use **Devices > Scripts and remediations > Remediations** to automatically re-apply the debloat
+on a recurring schedule. This catches newly installed bloatware, corrects settings drift,
+and optionally creates an ITSM ticket each cycle.
+
+Two scripts are provided for this blade:
+
+| File | Role |
+|---|---|
+| `Intune-Detection-Windows11Debloat.ps1` | Upload as **Detection script** |
+| `Intune-Remediation-Windows11Debloat.ps1` | Upload as **Remediation script** |
+
+#### Prepare the remediation script
+
+Open `Intune-Remediation-Windows11Debloat.ps1` and set the variables at the top before uploading:
+
+```powershell
+$PackageZipUrl    = 'https://your-storage.example.com/Windows11Debloat.zip'
+$PackageZipSha256 = 'YOUR_SHA256_HASH'   # or leave blank to skip verification
+```
+
+Uncomment the ticketing parameter lines if you want an ITSM ticket per monthly cycle.
+
+#### Create the Remediations policy in Intune
+
+Navigate to **Devices > Scripts and remediations > Remediations > Create**.
+
+| Tab | Field | Value |
+|---|---|---|
+| **Basics** | Name | `Windows 11 Debloat - Monthly` |
+| **Settings** | Detection script | Upload `Intune-Detection-Windows11Debloat.ps1` |
+| **Settings** | Remediation script | Upload `Intune-Remediation-Windows11Debloat.ps1` |
+| **Settings** | Run this script using the logged on credentials | **No** (SYSTEM) |
+| **Settings** | Enforce script signature check | **No** |
+| **Settings** | Run script in 64-bit PowerShell Host | **Yes** |
+| **Assignments** | Schedule | Daily check; remediation triggers only when non-compliant |
+| **Assignments** | Groups | Scope to your device groups / rings |
+
+#### How detection works
+
+The detection script reads `HKLM:\SOFTWARE\Windows11Debloat` and exits:
+
+- **Exit 1 (non-compliant — remediation runs)** if:
+  - Registry key is missing (script has never run on this device)
+  - `LastRunStatus` is not `Success`, or `LastExitCode` is not `0`
+  - `LastRunUtc` is older than **30 days**
+- **Exit 0 (compliant — no action)** if all checks pass
+
+To change the re-run interval, edit `$MaxAgeDays` in `Intune-Detection-Windows11Debloat.ps1`:
+
+```powershell
+$MaxAgeDays = 30   # change to 7 for weekly, 90 for quarterly
+```
+
+---
 
 ### Cleanup scope split
 
