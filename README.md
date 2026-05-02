@@ -480,6 +480,25 @@ Staged files include the script, vendor profile JSON, helpdesk launcher, and REA
 
 ### Intune single-file bootstrap mode — upload one file, all scripts auto-created on device
 
+#### Fast Intune quick start (recommended)
+
+Use this path if you want the simplest setup for admins and helpdesk teams.
+
+1. Edit `Intune-Bootstrap-Windows11Debloat.ps1` and set `PackageZipUrl` to your hosted zip URL.
+2. In Intune, go to **Devices > Scripts and remediations > Platform scripts > Add**.
+3. Upload `Intune-Bootstrap-Windows11Debloat.ps1` with these settings:
+	- Run this script using the logged on credentials: **No**
+	- Enforce script signature check: **No**
+	- Run script in 64-bit PowerShell Host: **Yes**
+4. Assign to a pilot device group first, then expand to production groups.
+5. After run, all script files are auto-created under `C:\ProgramData\Windows11Debloat`.
+
+Helpdesk path after deployment:
+- `C:\ProgramData\Windows11Debloat\Run-Windows11Debloat-Helpdesk.cmd`
+
+Answer to the common question "does uploading one Intune script create the rest of the files?":
+- **Yes**. The bootstrap downloads and stages the full package, so technicians can remote in and run from `C:\ProgramData\Windows11Debloat`.
+
 Upload only **`Intune-Bootstrap-Windows11Debloat.ps1`** to Intune.
 When the policy runs on a device, the script downloads your hosted zip, extracts all repository files,
 and stages them to `C:\ProgramData\Windows11Debloat` automatically — no manual file copy is needed.

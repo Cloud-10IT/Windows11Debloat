@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$PackageZipUrl,
 
     [Parameter(Mandatory = $false)]
@@ -57,6 +57,20 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Intune-friendly defaults:
+# Set these values before uploading the script to Devices > Scripts and remediations.
+if (-not $PSBoundParameters.ContainsKey('PackageZipUrl')) {
+    $PackageZipUrl = 'https://your-storage.example.com/Windows11Debloat.zip'
+}
+
+if (-not $PSBoundParameters.ContainsKey('PackageZipSha256')) {
+    $PackageZipSha256 = ''
+}
+
+if ([string]::IsNullOrWhiteSpace($PackageZipUrl) -or $PackageZipUrl -like 'https://your-storage.example.com/*') {
+    throw "PackageZipUrl is not configured. Edit Intune-Bootstrap-Windows11Debloat.ps1 and set a real package URL before uploading to Intune."
+}
 
 function Write-Info {
     param([string]$Message)
