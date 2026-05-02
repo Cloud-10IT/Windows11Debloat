@@ -524,13 +524,22 @@ Before uploading to Intune, open `Intune-Bootstrap-Windows11Debloat.ps1` and set
 `-PackageZipUrl` (and optionally `-PackageZipSha256`) as the default parameter values,
 since Intune Platform scripts do not support passing arguments to uploaded scripts.
 
+Important: Intune **Assignments** only chooses target groups. It does **not** pass `-Stage` or any other script arguments.
+To use rings (`Test` then `Deploy`), you publish separate script files/policies.
+
+Ring method:
+1. Create a pilot copy, for example `Intune-Bootstrap-Windows11Debloat-Test.ps1`, and set `[string]$Stage = 'Test'`.
+2. Create a production copy, for example `Intune-Bootstrap-Windows11Debloat-Deploy.ps1`, and set `[string]$Stage = 'Deploy'`.
+3. Upload each file as a separate Platform script policy.
+4. Assign the `Test` policy to pilot devices and the `Deploy` policy to broad production devices.
+
 Key parameters to configure for your environment:
 
 | Parameter | What to set |
 |---|---|
 | `-PackageZipUrl` | Your hosted zip URL from Step 1 |
 | `-PackageZipSha256` | Your SHA-256 hash (optional, recommended) |
-| `-Stage` | `Deploy` for production; `Test` for pilot ring (dry run) |
+| `-Stage` | Set inside the uploaded script file (`Test` for pilot policy, `Deploy` for production policy) |
 | `-AutoDetect` | Include — auto-detects Dell / Lenovo / HP / etc. |
 | `-IncludeCommon` | Include — removes common cross-vendor bloatware |
 | `-RecordTicketResult` + `-TicketSystem` | Include if you want an ITSM ticket per device run |
@@ -548,9 +557,9 @@ On the **Script settings** tab configure the following:
 | **Enforce script signature check** | **No** | Script is not code-signed; Yes would block execution |
 | **Run script in 64-bit PowerShell Host** | **Yes** | Required for correct HKLM registry paths and WMI vendor detection |
 
-In **Assignments** scope the policy to your device groups. Use rings:
-- Pilot group first with `-Stage Test` (dry run, no real changes)
-- Broad group after sign-off with `-Stage Deploy`
+In **Assignments**, scope each policy to the right device group:
+- Assign the script file with `Stage = Test` to pilot devices
+- Assign the script file with `Stage = Deploy` to broad production devices
 
 > **Note:** Platform scripts run **once** per device on policy assignment. Use this for initial provisioning.
 > For monthly automatic re-runs (drift correction), use the Remediations blade described below.
