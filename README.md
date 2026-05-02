@@ -61,6 +61,10 @@ How to use in RMM:
 - Pilot ring: run `-Stage Test` first and validate summary/log output.
 - Production ring: switch only `-Stage Deploy` and keep the same vendor/scope arguments.
 - Recurring post-update cleanup: set `-CleanupScope User` for user-context reruns.
+- Test stage now writes restore artifacts to `C:\Logs\<domain>\RestorePlans` (fallback `C:\Logs\Default\RestorePlans`):
+	- `RemovedApps-<vendor>-<timestamp>.json` (manifest of appx/winget targets)
+	- `Restore-RemovedApps-<vendor>-<timestamp>.ps1` (best-effort reinstall helper)
+- To send ticket/email notifications during Test stage, pass `-TicketNotifyEmail`; combo will auto-enable `-RecordTicketResult` for that run.
 
 ### RMM direct commands
 

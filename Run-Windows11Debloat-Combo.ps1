@@ -251,6 +251,12 @@ else {
 
 $hostExecutable = Resolve-HostExecutable
 $commandPreview = $hostExecutable + ' ' + (($argList | ForEach-Object { Format-ArgumentForPreview -Value $_ }) -join ' ')
+
+if ($Stage -eq 'Test' -and -not $RecordTicketResult -and -not [string]::IsNullOrWhiteSpace($TicketNotifyEmail)) {
+    $RecordTicketResult = $true
+    Write-Host '[INFO] Test stage detected with TicketNotifyEmail configured. Enabling RecordTicketResult automatically.'
+}
+
 Write-Host '[INFO] Effective combo settings:'
 Write-Host "[INFO]   Stage: $Stage"
 Write-Host "[INFO]   CleanupScope: $CleanupScope"

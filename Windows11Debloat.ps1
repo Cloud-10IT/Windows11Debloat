@@ -56,6 +56,13 @@ $script:ScriptRoot = $null
 $script:AllUsersAppxPackages = $null
 $script:ProvisionedAppxPackages = $null
 $script:IsDryRun = $false
+$script:RemovalJournal = @{
+    AppxRequestedPatterns = @()
+    AppxMatchedNames = @()
+    AppxRemovedNames = @()
+    WingetRequestedIds = @()
+    WingetRemovedIds = @()
+}
 $script:DryRunSummary = @{
     Appx = 0
     Winget = 0
@@ -278,6 +285,188 @@ function Write-DryRunSummary {
     Write-Status -Message "  Registry tweaks: $($script:DryRunSummary.RegistryTweaks)" -Level 'Info'
     Write-Status -Message "  Hibernation actions: $($script:DryRunSummary.Hibernation)" -Level 'Info'
     Write-Status -Message "  OneDrive actions: $($script:DryRunSummary.OneDrive)" -Level 'Info'
+}
+
+function Add-RemovalJournalValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('AppxRequestedPatterns', 'AppxMatchedNames', 'AppxRemovedNames', 'WingetRequestedIds', 'WingetRemovedIds')]
+        [string]$Bucket,
+
+        [Parameter(Mandatory = $false)]
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return
+    }
+
+    if ($script:RemovalJournal[$Bucket] -notcontains $Value) {
+        $script:RemovalJournal[$Bucket] += $Value
+    }
+}
+
+function Export-ReinstallArtifacts {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LogRootBasePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$VendorName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Scope,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RunMode,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$DryRunMode
+    )
+
+    try {
+        $restoreRoot = Get-DomainScopedPath -BasePath $LogRootBasePath -ChildPath 'RestorePlans'
+        if (-not (Test-Path -Path $restoreRoot)) {
+            New-Item -Path $restoreRoot -ItemType Directory -Force | Out-Null
+        }
+
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $manifestPath = Join-Path -Path $restoreRoot -ChildPath ("RemovedApps-{0}-{1}.json" -f $VendorName, $timestamp)
+        $restoreScriptPath = Join-Path -Path $restoreRoot -ChildPath ("Restore-RemovedApps-{0}-{1}.ps1" -f $VendorName, $timestamp)
+
+        $manifest = [ordered]@{
+            TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
+            Vendor = $VendorName
+            CleanupScope = $Scope
+            RunMode = $RunMode
+            DryRun = $DryRunMode
+            AppxRequestedPatterns = $script:RemovalJournal.AppxRequestedPatterns
+            AppxMatchedNames = $script:RemovalJournal.AppxMatchedNames
+            AppxRemovedNames = $script:RemovalJournal.AppxRemovedNames
+            WingetRequestedIds = $script:RemovalJournal.WingetRequestedIds
+            WingetRemovedIds = $script:RemovalJournal.WingetRemovedIds
+        }
+
+        $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path $manifestPath -Encoding UTF8
+
+        $manifestPathForScript = $manifestPath -replace "'", "''"
+
+        $restoreScript = @"
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = `$false)]
+    [string]`$ManifestPath = '$manifestPathForScript'
+)
+
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Continue'
+
+function Write-Info {
+    param([string]`$Message)
+    Write-Host "[INFO] `$Message"
+}
+
+function Write-Warn {
+    param([string]`$Message)
+    Write-Host "[WARN] `$Message"
+}
+
+function Test-WingetAvailable {
+    return (`$null -ne (Get-Command winget -ErrorAction SilentlyContinue))
+}
+
+function Install-WithWinget {
+    param([Parameter(Mandatory = `$true)][string]`$PackageIdOrName)
+
+    if (-not (Test-WingetAvailable)) {
+        Write-Warn 'winget is not available; skipping winget reinstall.'
+        return `$false
+    }
+
+    try {
+        winget install --id `$PackageIdOrName --exact --silent --accept-source-agreements --accept-package-agreements | Out-Null
+        if (`$LASTEXITCODE -eq 0) {
+            Write-Info "Reinstalled via winget id: `$PackageIdOrName"
+            return `$true
+        }
+    }
+    catch {
+    }
+
+    try {
+        winget install --name `$PackageIdOrName --exact --silent --accept-source-agreements --accept-package-agreements | Out-Null
+        if (`$LASTEXITCODE -eq 0) {
+            Write-Info "Reinstalled via winget name: `$PackageIdOrName"
+            return `$true
+        }
+    }
+    catch {
+    }
+
+    return `$false
+}
+
+if (-not (Test-Path -Path `$ManifestPath)) {
+    throw "Manifest not found: `$ManifestPath"
+}
+
+`$manifest = Get-Content -Path `$ManifestPath -Raw | ConvertFrom-Json
+
+Write-Info "Loaded restore manifest: `$ManifestPath"
+Write-Info "RunMode=`$(`$manifest.RunMode) DryRun=`$(`$manifest.DryRun)"
+
+`$wingetTargets = @()
+if (`$manifest.WingetRemovedIds) { `$wingetTargets += @(`$manifest.WingetRemovedIds) }
+if (`$manifest.WingetRequestedIds) { `$wingetTargets += @(`$manifest.WingetRequestedIds) }
+`$wingetTargets = `$wingetTargets | Where-Object { -not [string]::IsNullOrWhiteSpace(`$_) } | Select-Object -Unique
+
+foreach (`$id in `$wingetTargets) {
+    if (-not (Install-WithWinget -PackageIdOrName `$id)) {
+        Write-Warn "Could not reinstall via winget: `$id"
+    }
+}
+
+`$appxTargets = @()
+if (`$manifest.AppxRemovedNames) { `$appxTargets += @(`$manifest.AppxRemovedNames) }
+if (`$manifest.AppxMatchedNames) { `$appxTargets += @(`$manifest.AppxMatchedNames) }
+`$appxTargets = `$appxTargets | Where-Object { -not [string]::IsNullOrWhiteSpace(`$_) -and (`$_ -notmatch '[\*\?]') } | Select-Object -Unique
+
+foreach (`$appxName in `$appxTargets) {
+    `$restored = `$false
+
+    try {
+        `$pkg = Get-AppxPackage -Name `$appxName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (`$pkg -and -not [string]::IsNullOrWhiteSpace(`$pkg.InstallLocation)) {
+            `$manifestXml = Join-Path -Path `$pkg.InstallLocation -ChildPath 'AppxManifest.xml'
+            if (Test-Path -Path `$manifestXml) {
+                Add-AppxPackage -DisableDevelopmentMode -Register `$manifestXml -ErrorAction Stop
+                Write-Info "Re-registered Appx package: `$appxName"
+                `$restored = `$true
+            }
+        }
+    }
+    catch {
+        Write-Warn "Appx re-register failed for `$appxName. `$(`$_.Exception.Message)"
+    }
+
+    if (-not `$restored) {
+        if (-not (Install-WithWinget -PackageIdOrName `$appxName)) {
+            Write-Warn "Appx restore requires manual action for: `$appxName"
+        }
+    }
+}
+
+Write-Info 'Restore pass complete.'
+"@
+
+        Set-Content -Path $restoreScriptPath -Value $restoreScript -Encoding UTF8
+
+        Write-Status -Message "Removal manifest written to: $manifestPath" -Level 'Info'
+        Write-Status -Message "Restore script written to: $restoreScriptPath" -Level 'Info'
+    }
+    catch {
+        Write-Status -Message "Failed to export restore artifacts. $($_.Exception.Message)" -Level 'Warn'
+    }
 }
 
 function Copy-HelpdeskArtifacts {
@@ -503,8 +692,27 @@ function Remove-AppxByName {
         [string[]]$Names
     )
 
+    foreach ($name in $Names) {
+        Add-RemovalJournalValue -Bucket 'AppxRequestedPatterns' -Value $name
+    }
+
     if ($script:IsDryRun -or $WhatIfPreference) {
         Add-DryRunCount -Category 'Appx' -Count $Names.Count
+
+        if ($null -eq $script:AllUsersAppxPackages) {
+            $script:AllUsersAppxPackages = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue
+        }
+
+        foreach ($name in $Names) {
+            $matchPattern = if ($name -match '[\*\?]') { $name } else { "$name*" }
+            $packages = $script:AllUsersAppxPackages | Where-Object {
+                $_.Name -like $matchPattern -or $_.PackageFullName -like $matchPattern
+            }
+
+            foreach ($pkg in @($packages)) {
+                Add-RemovalJournalValue -Bucket 'AppxMatchedNames' -Value $pkg.Name
+            }
+        }
 
         if ($QuietDryRun) {
             return
@@ -532,6 +740,10 @@ function Remove-AppxByName {
                 $_.Name -like $matchPattern -or $_.PackageFullName -like $matchPattern
             }
 
+            foreach ($pkg in @($packages)) {
+                Add-RemovalJournalValue -Bucket 'AppxMatchedNames' -Value $pkg.Name
+            }
+
             if (-not $packages) {
                 Write-Status -Message "Appx package not found: $name" -Level 'Warn'
             }
@@ -539,6 +751,7 @@ function Remove-AppxByName {
             foreach ($pkg in @($packages)) {
                 if ($PSCmdlet.ShouldProcess($pkg.PackageFullName, 'Remove-AppxPackage -AllUsers')) {
                     Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
+                    Add-RemovalJournalValue -Bucket 'AppxRemovedNames' -Value $pkg.Name
                 }
             }
 
@@ -566,6 +779,10 @@ function Uninstall-WingetPackages {
         [Parameter(Mandatory = $true)]
         [string[]]$Ids
     )
+
+    foreach ($id in $Ids) {
+        Add-RemovalJournalValue -Bucket 'WingetRequestedIds' -Value $id
+    }
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Status -Message 'winget is not available. Skipping winget package removals.' -Level 'Warn'
@@ -607,6 +824,7 @@ function Uninstall-WingetPackages {
             }
 
             if ($removed) {
+                Add-RemovalJournalValue -Bucket 'WingetRemovedIds' -Value $id
                 Write-Status -Message "Removed winget package: $id" -Level 'Success'
             }
             else {
@@ -1356,6 +1574,14 @@ catch {
     $script:ExitCode = Resolve-ExitCode -Exception $_.Exception
 }
 finally {
+    $shouldExportRestoreArtifacts = $script:IsDryRun -or
+        $script:RemovalJournal.AppxRemovedNames.Count -gt 0 -or
+        $script:RemovalJournal.WingetRemovedIds.Count -gt 0
+
+    if ($shouldExportRestoreArtifacts) {
+        Export-ReinstallArtifacts -LogRootBasePath $LogBasePath -VendorName $script:ResolvedVendor -Scope $script:ResolvedCleanupScope -RunMode $script:RunMode -DryRunMode $script:IsDryRun
+    }
+
     if (-not $script:SkipMarkerWrite -and -not $script:IsDryRun) {
         $runStatus = if ($script:ExitCode -eq $script:ExitCodes.Success) { 'Success' } else { 'Failed' }
         Write-DetectionMarker -Path $MarkerRegistryPath -Status $runStatus -ExitCode $script:ExitCode -VendorName $script:ResolvedVendor -Scope $script:ResolvedCleanupScope -RunMode $script:RunMode -RunContext $script:RunContext
