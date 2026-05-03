@@ -55,14 +55,29 @@ param(
     [int]$ScheduleDelayMinutes = 45,
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('Interval', 'AfterWindowsUpdate', 'IntervalAndAfterWindowsUpdate')]
+    [ValidateSet('Interval', 'AfterWindowsUpdate', 'IntervalAndAfterWindowsUpdate', 'MonthlyDayOfWeek', 'MonthlyFixedDay')]
     [string]$ScheduleTriggerMode = 'IntervalAndAfterWindowsUpdate',
 
     [Parameter(Mandatory = $false)]
     [switch]$HasIntuneRemediationsLicense,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipScheduleRegistration
+    [switch]$SkipScheduleRegistration,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$AlsoRunAfterWindowsUpdate,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 28)]
+    [int]$ScheduleDayOfMonth = 15,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('1', '2', '3', '4', 'Last')]
+    [string]$ScheduleWeekOfMonth = '2',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')]
+    [string]$ScheduleDayOfWeek = 'Wednesday'
 )
 
 Set-StrictMode -Version Latest
@@ -99,6 +114,10 @@ $RmmDefaults = @{
     ScheduleDelayMinutes        = 45                  # Delay before the first interval run and after Windows Update events
     ScheduleTriggerMode         = 'IntervalAndAfterWindowsUpdate' # Interval, AfterWindowsUpdate, or both
     HasIntuneRemediationsLicense = $false             # $true when licensed Intune Remediations will be used instead of local tasks
+    AlsoRunAfterWindowsUpdate    = $false              # $true to also register the Windows Update event trigger alongside a monthly trigger
+    ScheduleDayOfMonth           = 15                  # Day of month for MonthlyFixedDay trigger (1-28)
+    ScheduleWeekOfMonth          = '2'                 # Week of month for MonthlyDayOfWeek trigger: '1','2','3','4','Last'
+    ScheduleDayOfWeek            = 'Wednesday'         # Day of week for MonthlyDayOfWeek trigger: Monday-Sunday
     # Note: Jira REST API credentials are configured via Ticketing-Setup.ps1 -Action Setup
     # or set in ticketing-config.json. No Jira fields are needed here unless you use
     # Intune-Bootstrap-Windows11Debloat.ps1 which passes them directly.
@@ -122,6 +141,10 @@ if (-not $PSBoundParameters.ContainsKey('ScheduleIntervalDays')) { $ScheduleInte
 if (-not $PSBoundParameters.ContainsKey('ScheduleDelayMinutes')) { $ScheduleDelayMinutes = $RmmDefaults.ScheduleDelayMinutes }
 if (-not $PSBoundParameters.ContainsKey('ScheduleTriggerMode')) { $ScheduleTriggerMode = $RmmDefaults.ScheduleTriggerMode }
 if (-not $PSBoundParameters.ContainsKey('HasIntuneRemediationsLicense')) { $HasIntuneRemediationsLicense = $RmmDefaults.HasIntuneRemediationsLicense }
+if (-not $PSBoundParameters.ContainsKey('AlsoRunAfterWindowsUpdate')) { $AlsoRunAfterWindowsUpdate = $RmmDefaults.AlsoRunAfterWindowsUpdate }
+if (-not $PSBoundParameters.ContainsKey('ScheduleDayOfMonth')) { $ScheduleDayOfMonth = $RmmDefaults.ScheduleDayOfMonth }
+if (-not $PSBoundParameters.ContainsKey('ScheduleWeekOfMonth')) { $ScheduleWeekOfMonth = $RmmDefaults.ScheduleWeekOfMonth }
+if (-not $PSBoundParameters.ContainsKey('ScheduleDayOfWeek')) { $ScheduleDayOfWeek = $RmmDefaults.ScheduleDayOfWeek }
 
 function Resolve-RootPath {
     if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
@@ -231,7 +254,9 @@ function Invoke-TicketResultRecording {
 function Get-RecurringTaskDefinitions {
     return @(
         @{ Name = 'Windows11Debloat-Recurring'; Kind = 'Interval' },
-        @{ Name = 'Windows11Debloat-AfterWindowsUpdate'; Kind = 'AfterWindowsUpdate' }
+        @{ Name = 'Windows11Debloat-AfterWindowsUpdate'; Kind = 'AfterWindowsUpdate' },
+        @{ Name = 'Windows11Debloat-MonthlyDayOfWeek'; Kind = 'MonthlyDayOfWeek' },
+        @{ Name = 'Windows11Debloat-MonthlyFixedDay'; Kind = 'MonthlyFixedDay' }
     )
 }
 
@@ -488,6 +513,178 @@ $delayElement      <Enabled>true</Enabled>
         }
 }
 
+function Register-MonthlyDayOfWeekRecurringTask {
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskName,
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][string]$Arguments,
+        [Parameter(Mandatory = $true)][int]$DelayMinutes,
+        [Parameter(Mandatory = $true)][ValidateSet('1','2','3','4','Last')][string]$WeekOfMonth,
+        [Parameter(Mandatory = $true)][ValidateSet('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')][string]$DayOfWeek
+    )
+
+    $weekXml          = if ($WeekOfMonth -eq 'Last') { '<Last />' } else { "<Week>$WeekOfMonth</Week>" }
+    $dayXml           = "<$DayOfWeek />"
+    $escapedCommand   = [System.Security.SecurityElement]::Escape($Command)
+    $escapedArguments = [System.Security.SecurityElement]::Escape($Arguments)
+    $startBoundary    = Get-Date -Format 'yyyy-MM-ddT09:00:00'
+    $delayElement     = if ($DelayMinutes -gt 0) { "      <Delay>PT${DelayMinutes}M</Delay>`r`n" } else { '' }
+
+    $taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+    <RegistrationInfo>
+        <Description>Runs Windows11Debloat on the $WeekOfMonth $DayOfWeek of every month.</Description>
+    </RegistrationInfo>
+    <Triggers>
+        <CalendarTrigger>
+$delayElement            <StartBoundary>$startBoundary</StartBoundary>
+            <Enabled>true</Enabled>
+            <ScheduleByMonthDayOfWeek>
+                <Weeks>$weekXml</Weeks>
+                <DaysOfWeek>$dayXml</DaysOfWeek>
+                <Months>
+                    <January /><February /><March /><April /><May /><June />
+                    <July /><August /><September /><October /><November /><December />
+                </Months>
+            </ScheduleByMonthDayOfWeek>
+        </CalendarTrigger>
+    </Triggers>
+    <Principals>
+        <Principal id="Author">
+            <UserId>S-1-5-18</UserId>
+            <LogonType>ServiceAccount</LogonType>
+            <RunLevel>HighestAvailable</RunLevel>
+        </Principal>
+    </Principals>
+    <Settings>
+        <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+        <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+        <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+        <AllowHardTerminate>true</AllowHardTerminate>
+        <StartWhenAvailable>true</StartWhenAvailable>
+        <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+        <IdleSettings>
+            <StopOnIdleEnd>false</StopOnIdleEnd>
+            <RestartOnIdle>false</RestartOnIdle>
+        </IdleSettings>
+        <AllowStartOnDemand>true</AllowStartOnDemand>
+        <Enabled>true</Enabled>
+        <Hidden>false</Hidden>
+        <RunOnlyIfIdle>false</RunOnlyIfIdle>
+        <WakeToRun>false</WakeToRun>
+        <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+        <Priority>7</Priority>
+    </Settings>
+    <Actions Context="Author">
+        <Exec>
+            <Command>$escapedCommand</Command>
+            <Arguments>$escapedArguments</Arguments>
+        </Exec>
+    </Actions>
+</Task>
+"@
+
+    $tempXmlPath = Join-Path -Path $env:TEMP -ChildPath ("Windows11Debloat-ScheduledTask-" + [Guid]::NewGuid().ToString('N') + '.xml')
+    try {
+        Set-Content -Path $tempXmlPath -Value $taskXml -Encoding Unicode
+        & schtasks.exe /Create /TN $TaskName /XML $tempXmlPath /F | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "schtasks.exe returned exit code $LASTEXITCODE while creating '$TaskName'."
+        }
+        Write-Host "[INFO] Registered monthly day-of-week scheduled task: $TaskName (week $WeekOfMonth, $DayOfWeek)"
+    }
+    finally {
+        if (Test-Path -Path $tempXmlPath) {
+            Remove-Item -Path $tempXmlPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Register-MonthlyFixedDayRecurringTask {
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskName,
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][string]$Arguments,
+        [Parameter(Mandatory = $true)][int]$DelayMinutes,
+        [Parameter(Mandatory = $true)][ValidateRange(1, 28)][int]$DayOfMonth
+    )
+
+    $escapedCommand   = [System.Security.SecurityElement]::Escape($Command)
+    $escapedArguments = [System.Security.SecurityElement]::Escape($Arguments)
+    $startBoundary    = Get-Date -Format 'yyyy-MM-ddT09:00:00'
+    $delayElement     = if ($DelayMinutes -gt 0) { "      <Delay>PT${DelayMinutes}M</Delay>`r`n" } else { '' }
+
+    $taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+    <RegistrationInfo>
+        <Description>Runs Windows11Debloat on day $DayOfMonth of every month.</Description>
+    </RegistrationInfo>
+    <Triggers>
+        <CalendarTrigger>
+$delayElement            <StartBoundary>$startBoundary</StartBoundary>
+            <Enabled>true</Enabled>
+            <ScheduleByMonth>
+                <DaysOfMonth><Day>$DayOfMonth</Day></DaysOfMonth>
+                <Months>
+                    <January /><February /><March /><April /><May /><June />
+                    <July /><August /><September /><October /><November /><December />
+                </Months>
+            </ScheduleByMonth>
+        </CalendarTrigger>
+    </Triggers>
+    <Principals>
+        <Principal id="Author">
+            <UserId>S-1-5-18</UserId>
+            <LogonType>ServiceAccount</LogonType>
+            <RunLevel>HighestAvailable</RunLevel>
+        </Principal>
+    </Principals>
+    <Settings>
+        <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+        <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+        <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+        <AllowHardTerminate>true</AllowHardTerminate>
+        <StartWhenAvailable>true</StartWhenAvailable>
+        <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+        <IdleSettings>
+            <StopOnIdleEnd>false</StopOnIdleEnd>
+            <RestartOnIdle>false</RestartOnIdle>
+        </IdleSettings>
+        <AllowStartOnDemand>true</AllowStartOnDemand>
+        <Enabled>true</Enabled>
+        <Hidden>false</Hidden>
+        <RunOnlyIfIdle>false</RunOnlyIfIdle>
+        <WakeToRun>false</WakeToRun>
+        <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+        <Priority>7</Priority>
+    </Settings>
+    <Actions Context="Author">
+        <Exec>
+            <Command>$escapedCommand</Command>
+            <Arguments>$escapedArguments</Arguments>
+        </Exec>
+    </Actions>
+</Task>
+"@
+
+    $tempXmlPath = Join-Path -Path $env:TEMP -ChildPath ("Windows11Debloat-ScheduledTask-" + [Guid]::NewGuid().ToString('N') + '.xml')
+    try {
+        Set-Content -Path $tempXmlPath -Value $taskXml -Encoding Unicode
+        & schtasks.exe /Create /TN $TaskName /XML $tempXmlPath /F | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "schtasks.exe returned exit code $LASTEXITCODE while creating '$TaskName'."
+        }
+        Write-Host "[INFO] Registered monthly fixed-day scheduled task: $TaskName (day $DayOfMonth)"
+    }
+    finally {
+        if (Test-Path -Path $tempXmlPath) {
+            Remove-Item -Path $tempXmlPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Register-RecurringTasksIfNeeded {
         param(
                 [Parameter(Mandatory = $true)]
@@ -560,8 +757,17 @@ function Register-RecurringTasksIfNeeded {
                 Register-IntervalRecurringTask -TaskName 'Windows11Debloat-Recurring' -Command $taskHostExecutable -Arguments $taskArgumentLine -IntervalDays $ScheduleIntervalDays -DelayMinutes $ScheduleDelayMinutes
         }
 
-        if ($ScheduleTriggerMode -in @('AfterWindowsUpdate', 'IntervalAndAfterWindowsUpdate')) {
+        if ($ScheduleTriggerMode -in @('AfterWindowsUpdate', 'IntervalAndAfterWindowsUpdate') -or
+            ($ScheduleTriggerMode -in @('MonthlyDayOfWeek', 'MonthlyFixedDay') -and $AlsoRunAfterWindowsUpdate)) {
                 Register-WindowsUpdateRecurringTask -TaskName 'Windows11Debloat-AfterWindowsUpdate' -Command $taskHostExecutable -Arguments $taskArgumentLine -DelayMinutes $ScheduleDelayMinutes
+        }
+
+        if ($ScheduleTriggerMode -eq 'MonthlyDayOfWeek') {
+                Register-MonthlyDayOfWeekRecurringTask -TaskName 'Windows11Debloat-MonthlyDayOfWeek' -Command $taskHostExecutable -Arguments $taskArgumentLine -DelayMinutes $ScheduleDelayMinutes -WeekOfMonth $ScheduleWeekOfMonth -DayOfWeek $ScheduleDayOfWeek
+        }
+
+        if ($ScheduleTriggerMode -eq 'MonthlyFixedDay') {
+                Register-MonthlyFixedDayRecurringTask -TaskName 'Windows11Debloat-MonthlyFixedDay' -Command $taskHostExecutable -Arguments $taskArgumentLine -DelayMinutes $ScheduleDelayMinutes -DayOfMonth $ScheduleDayOfMonth
         }
 }
 
@@ -645,6 +851,10 @@ Write-Host "[INFO]   ScheduleIntervalDays: $ScheduleIntervalDays"
 Write-Host "[INFO]   ScheduleDelayMinutes: $ScheduleDelayMinutes"
 Write-Host "[INFO]   ScheduleTriggerMode: $ScheduleTriggerMode"
 Write-Host "[INFO]   HasIntuneRemediationsLicense: $([bool]$HasIntuneRemediationsLicense)"
+Write-Host "[INFO]   AlsoRunAfterWindowsUpdate: $([bool]$AlsoRunAfterWindowsUpdate)"
+Write-Host "[INFO]   ScheduleWeekOfMonth: $ScheduleWeekOfMonth"
+Write-Host "[INFO]   ScheduleDayOfWeek: $ScheduleDayOfWeek"
+Write-Host "[INFO]   ScheduleDayOfMonth: $ScheduleDayOfMonth"
 Write-Host "[INFO] Stage: $Stage"
 Write-Host "[INFO] Command: $commandPreview"
 

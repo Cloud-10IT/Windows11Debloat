@@ -504,7 +504,11 @@ Use this path if you want the simplest setup for admins and helpdesk teams.
 	- `Stage` = `Test` for pilot or `Deploy` for production
 	- `HasIntuneRemediationsLicense` = `$true` if you will use licensed Intune Remediations for recurring runs
 	- `EnableScheduledRerun` = `$true` only when you do **not** have Remediations licensing and want a local fallback scheduled task
-	- `ScheduleIntervalDays`, `ScheduleDelayMinutes`, `ScheduleTriggerMode` = fallback task cadence/delay settings when `EnableScheduledRerun` is enabled
+	- `ScheduleTriggerMode` = trigger type: `Interval`, `AfterWindowsUpdate`, `IntervalAndAfterWindowsUpdate`, `MonthlyDayOfWeek`, or `MonthlyFixedDay`
+	- `ScheduleIntervalDays`, `ScheduleDelayMinutes` = cadence/delay settings for interval-based triggers
+	- `ScheduleWeekOfMonth`, `ScheduleDayOfWeek` = required when using `MonthlyDayOfWeek` (e.g. `'2'`, `'Wednesday'` = 2nd Wednesday)
+	- `ScheduleDayOfMonth` = required when using `MonthlyFixedDay` (e.g. `15` = 15th of each month)
+	- `AlsoRunAfterWindowsUpdate` = `$true` to also register the Windows Update event trigger alongside any monthly trigger
 2. In Intune, go to **Devices > Scripts and remediations > Platform scripts > Add**.
 3. Upload `Intune-Bootstrap-Windows11Debloat.ps1` with these settings:
 	- Run this script using the logged on credentials: **No**
@@ -554,14 +558,36 @@ Edit these fields before upload:
 6. `IncludeCommon` = enable common cross-vendor cleanup when desired.
 7. `RecordTicketResult`, `TicketSystem`, `TicketNotifyEmail`, `TicketRing` = ticketing behavior.
 8. `HasIntuneRemediationsLicense` = `$true` when you will use licensed Intune Remediations.
-9. `EnableScheduledRerun`, `ScheduleIntervalDays`, `ScheduleDelayMinutes`, `ScheduleTriggerMode` = local fallback scheduling only for unlicensed tenants.
+9. `EnableScheduledRerun`, `ScheduleTriggerMode`, `ScheduleIntervalDays`, `ScheduleDelayMinutes` = local fallback scheduling only for unlicensed tenants.
+   - For monthly patching schedules: set `ScheduleTriggerMode` to `MonthlyDayOfWeek` or `MonthlyFixedDay`
+   - `MonthlyDayOfWeek` also requires `ScheduleWeekOfMonth` (e.g. `'2'`) and `ScheduleDayOfWeek` (e.g. `'Wednesday'`)
+   - `MonthlyFixedDay` also requires `ScheduleDayOfMonth` (e.g. `15`)
+   - Set `AlsoRunAfterWindowsUpdate = $true` to add the Windows Update event trigger alongside any monthly trigger
 
 If the tenant does **not** have eligible Intune Remediations licensing, you can also enable the
-local fallback scheduler in this same defaults block. The fallback supports:
+local fallback scheduler in this same defaults block. The fallback supports five trigger modes:
 
-- An every-`N`-days interval trigger
-- A best-effort event trigger after Windows Update completion events (`Microsoft-Windows-WindowsUpdateClient` event IDs `19`, `43`, and `44`)
-- A configurable delay in minutes before the rerun starts
+| `ScheduleTriggerMode` | Description |
+|---|---|
+| `Interval` | Runs every N days (`ScheduleIntervalDays`) |
+| `AfterWindowsUpdate` | Runs after Windows Update completion events (IDs 19, 43, 44) |
+| `IntervalAndAfterWindowsUpdate` | Both of the above (default) |
+| `MonthlyDayOfWeek` | Runs on the Nth weekday of every month — set `ScheduleWeekOfMonth` and `ScheduleDayOfWeek` |
+| `MonthlyFixedDay` | Runs on a fixed day of every month — set `ScheduleDayOfMonth` |
+
+For monthly modes, set `AlsoRunAfterWindowsUpdate = $true` to also register the Windows Update event trigger alongside the monthly task.
+
+Common patching patterns:
+
+| Goal | Settings |
+|---|---|
+| Day after Patch Tuesday | `MonthlyDayOfWeek`, Week `'2'`, Day `'Wednesday'`, `AlsoRunAfterWindowsUpdate = $true` |
+| 2nd Sunday sweep | `MonthlyDayOfWeek`, Week `'2'`, Day `'Sunday'` |
+| Last Friday of month | `MonthlyDayOfWeek`, Week `'Last'`, Day `'Friday'` |
+| Fixed 15th of month | `MonthlyFixedDay`, `ScheduleDayOfMonth = 15` |
+| Every 30 days + catch updates | `IntervalAndAfterWindowsUpdate` (default) |
+
+A configurable delay (`ScheduleDelayMinutes`) applies to all trigger types — giving Windows Update or patch installs time to complete before the cleanup runs.
 
 If `HasIntuneRemediationsLicense = $true`, the combo script ignores the fallback scheduler and removes any previously created local tasks.
 
@@ -586,7 +612,11 @@ Key parameters to configure for your environment:
 | `-RecordTicketResult` + `-TicketSystem` | Include if you want an ITSM ticket per device run |
 | `-HasIntuneRemediationsLicense` | Set to true when you will use licensed Intune Remediations for drift correction |
 | `-EnableScheduledRerun` | Set to true only for the unlicensed fallback path |
-| `-ScheduleIntervalDays` / `-ScheduleDelayMinutes` / `-ScheduleTriggerMode` | Controls the local fallback scheduled task cadence |
+| `-ScheduleTriggerMode` | `Interval`, `AfterWindowsUpdate`, `IntervalAndAfterWindowsUpdate`, `MonthlyDayOfWeek`, or `MonthlyFixedDay` |
+| `-ScheduleIntervalDays` / `-ScheduleDelayMinutes` | Interval cadence and delay before each rerun |
+| `-ScheduleWeekOfMonth` / `-ScheduleDayOfWeek` | Required for `MonthlyDayOfWeek` — e.g. `'2'` + `'Wednesday'` = 2nd Wednesday |
+| `-ScheduleDayOfMonth` | Required for `MonthlyFixedDay` — e.g. `15` = 15th of each month |
+| `-AlsoRunAfterWindowsUpdate` | Adds Windows Update event trigger alongside any monthly trigger |
 
 #### Step 3 — Upload to Devices > Scripts and remediations
 
@@ -609,23 +639,39 @@ In **Assignments**, scope each policy to the right device group:
 > For monthly automatic re-runs (drift correction), use the Remediations blade described below.
 
 If you do **not** have eligible Intune Remediations licensing, use the fallback local scheduled task instead by enabling
-`EnableScheduledRerun` in `Intune-Bootstrap-Windows11Debloat.ps1`. When enabled, the combo registers one or both of these triggers:
+`EnableScheduledRerun` in `Intune-Bootstrap-Windows11Debloat.ps1`. When enabled, the combo registers tasks based on `ScheduleTriggerMode`:
 
-- Every `ScheduleIntervalDays` days
-- After Windows Update completion events, delayed by `ScheduleDelayMinutes`
+| Mode | Task registered |
+|---|---|
+| `Interval` | `Windows11Debloat-Recurring` (every N days) |
+| `AfterWindowsUpdate` | `Windows11Debloat-AfterWindowsUpdate` (event trigger) |
+| `IntervalAndAfterWindowsUpdate` | Both of the above |
+| `MonthlyDayOfWeek` | `Windows11Debloat-MonthlyDayOfWeek` — uses `ScheduleWeekOfMonth` + `ScheduleDayOfWeek` |
+| `MonthlyFixedDay` | `Windows11Debloat-MonthlyFixedDay` — uses `ScheduleDayOfMonth` |
+
+Set `AlsoRunAfterWindowsUpdate = $true` with any monthly mode to also register `Windows11Debloat-AfterWindowsUpdate` alongside it.
 
 Helpdesk verification for fallback tasks:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Windows11Debloat-Recurring','Windows11Debloat-AfterWindowsUpdate' -ErrorAction SilentlyContinue |
+Get-ScheduledTask -TaskName 'Windows11Debloat-Recurring',
+    'Windows11Debloat-AfterWindowsUpdate',
+    'Windows11Debloat-MonthlyDayOfWeek',
+    'Windows11Debloat-MonthlyFixedDay' -ErrorAction SilentlyContinue |
 	Select-Object TaskName, State, TaskPath
 ```
 
 Helpdesk cleanup for fallback tasks:
 
 ```powershell
-Unregister-ScheduledTask -TaskName 'Windows11Debloat-Recurring' -Confirm:$false -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName 'Windows11Debloat-AfterWindowsUpdate' -Confirm:$false -ErrorAction SilentlyContinue
+foreach ($name in @(
+    'Windows11Debloat-Recurring',
+    'Windows11Debloat-AfterWindowsUpdate',
+    'Windows11Debloat-MonthlyDayOfWeek',
+    'Windows11Debloat-MonthlyFixedDay'
+)) {
+    Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+}
 ```
 
 #### What gets created on the device automatically
@@ -688,8 +734,9 @@ on a recurring schedule. This catches newly installed bloatware, corrects settin
 and optionally creates an ITSM ticket each cycle.
 
 If you are using this licensed Remediations path, keep the bootstrap fallback scheduler disabled.
-The remediation run automatically removes previously created `Windows11Debloat-Recurring` and
-`Windows11Debloat-AfterWindowsUpdate` local tasks so only one recurring mechanism remains active.
+The remediation run automatically removes all previously created local fallback tasks
+(`Windows11Debloat-Recurring`, `Windows11Debloat-AfterWindowsUpdate`, `Windows11Debloat-MonthlyDayOfWeek`, `Windows11Debloat-MonthlyFixedDay`)
+so only one recurring mechanism remains active.
 
 Two scripts are provided for this blade:
 

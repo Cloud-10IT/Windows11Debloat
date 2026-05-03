@@ -74,11 +74,26 @@ param(
     [int]$ScheduleDelayMinutes = 45,
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('Interval', 'AfterWindowsUpdate', 'IntervalAndAfterWindowsUpdate')]
+    [ValidateSet('Interval', 'AfterWindowsUpdate', 'IntervalAndAfterWindowsUpdate', 'MonthlyDayOfWeek', 'MonthlyFixedDay')]
     [string]$ScheduleTriggerMode = 'IntervalAndAfterWindowsUpdate',
 
     [Parameter(Mandatory = $false)]
-    [switch]$HasIntuneRemediationsLicense
+    [switch]$HasIntuneRemediationsLicense,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$AlsoRunAfterWindowsUpdate,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 28)]
+    [int]$ScheduleDayOfMonth = 15,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('1', '2', '3', '4', 'Last')]
+    [string]$ScheduleWeekOfMonth = '2',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')]
+    [string]$ScheduleDayOfWeek = 'Wednesday'
 )
 
 Set-StrictMode -Version Latest
@@ -126,8 +141,12 @@ $IntuneDefaults = @{
     EnableScheduledRerun         = $false              # $true to create a local scheduled task fallback after a successful Deploy run
     ScheduleIntervalDays         = 30                  # Interval trigger cadence in days
     ScheduleDelayMinutes         = 45                  # Delay after registration time and after Windows Update event completion
-    ScheduleTriggerMode          = 'IntervalAndAfterWindowsUpdate' # Interval, AfterWindowsUpdate, or both
+    ScheduleTriggerMode          = 'IntervalAndAfterWindowsUpdate' # Interval, AfterWindowsUpdate, IntervalAndAfterWindowsUpdate, MonthlyDayOfWeek, MonthlyFixedDay
     HasIntuneRemediationsLicense = $false             # $true when you will use licensed Intune Remediations instead of local scheduled tasks
+    AlsoRunAfterWindowsUpdate    = $false              # $true to also register the Windows Update event trigger alongside a monthly trigger
+    ScheduleDayOfMonth           = 15                  # Day of month for MonthlyFixedDay trigger (1-28)
+    ScheduleWeekOfMonth          = '2'                 # Week of month for MonthlyDayOfWeek trigger: '1','2','3','4','Last'
+    ScheduleDayOfWeek            = 'Wednesday'         # Day of week for MonthlyDayOfWeek trigger: Monday-Sunday
 }
 
 if (-not $PSBoundParameters.ContainsKey('PackageZipUrl')) { $PackageZipUrl = $IntuneDefaults.PackageZipUrl }
@@ -152,6 +171,10 @@ if (-not $PSBoundParameters.ContainsKey('ScheduleIntervalDays')) { $ScheduleInte
 if (-not $PSBoundParameters.ContainsKey('ScheduleDelayMinutes')) { $ScheduleDelayMinutes = $IntuneDefaults.ScheduleDelayMinutes }
 if (-not $PSBoundParameters.ContainsKey('ScheduleTriggerMode')) { $ScheduleTriggerMode = $IntuneDefaults.ScheduleTriggerMode }
 if (-not $PSBoundParameters.ContainsKey('HasIntuneRemediationsLicense')) { $HasIntuneRemediationsLicense = $IntuneDefaults.HasIntuneRemediationsLicense }
+if (-not $PSBoundParameters.ContainsKey('AlsoRunAfterWindowsUpdate')) { $AlsoRunAfterWindowsUpdate = $IntuneDefaults.AlsoRunAfterWindowsUpdate }
+if (-not $PSBoundParameters.ContainsKey('ScheduleDayOfMonth')) { $ScheduleDayOfMonth = $IntuneDefaults.ScheduleDayOfMonth }
+if (-not $PSBoundParameters.ContainsKey('ScheduleWeekOfMonth')) { $ScheduleWeekOfMonth = $IntuneDefaults.ScheduleWeekOfMonth }
+if (-not $PSBoundParameters.ContainsKey('ScheduleDayOfWeek')) { $ScheduleDayOfWeek = $IntuneDefaults.ScheduleDayOfWeek }
 
 if ([string]::IsNullOrWhiteSpace($PackageZipUrl) -or $PackageZipUrl -like 'https://your-storage.example.com/*') {
     throw "PackageZipUrl is not configured. Edit Intune-Bootstrap-Windows11Debloat.ps1 and set a real package URL before uploading to Intune."
@@ -232,6 +255,10 @@ Write-Info "  ScheduleIntervalDays: $ScheduleIntervalDays"
 Write-Info "  ScheduleDelayMinutes: $ScheduleDelayMinutes"
 Write-Info "  ScheduleTriggerMode: $ScheduleTriggerMode"
 Write-Info "  HasIntuneRemediationsLicense: $([bool]$HasIntuneRemediationsLicense)"
+Write-Info "  AlsoRunAfterWindowsUpdate: $([bool]$AlsoRunAfterWindowsUpdate)"
+Write-Info "  ScheduleWeekOfMonth: $ScheduleWeekOfMonth"
+Write-Info "  ScheduleDayOfWeek: $ScheduleDayOfWeek"
+Write-Info "  ScheduleDayOfMonth: $ScheduleDayOfMonth"
 
 New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
 New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
@@ -345,6 +372,19 @@ try {
         $comboArgs.Add([string]$ScheduleDelayMinutes)
         $comboArgs.Add('-ScheduleTriggerMode')
         $comboArgs.Add($ScheduleTriggerMode)
+        if ($AlsoRunAfterWindowsUpdate) {
+            $comboArgs.Add('-AlsoRunAfterWindowsUpdate')
+        }
+        if ($ScheduleTriggerMode -eq 'MonthlyFixedDay') {
+            $comboArgs.Add('-ScheduleDayOfMonth')
+            $comboArgs.Add([string]$ScheduleDayOfMonth)
+        }
+        if ($ScheduleTriggerMode -eq 'MonthlyDayOfWeek') {
+            $comboArgs.Add('-ScheduleWeekOfMonth')
+            $comboArgs.Add($ScheduleWeekOfMonth)
+            $comboArgs.Add('-ScheduleDayOfWeek')
+            $comboArgs.Add($ScheduleDayOfWeek)
+        }
     }
 
     Write-Info 'Running debloat combo script from staged package'
