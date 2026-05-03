@@ -414,14 +414,12 @@ Examples:
 - ConnectWise
 - Splashtop
 
-When the device has already been through `IntuneMode`, have the remote tool call the staged local copy from:
-- `C:\<domain>\Scripts`
-- fallback: `C:\Default\Scripts`
+When the device has already been through `IntuneMode`, have the remote tool call the staged local copy from `C:\ProgramData\Windows11Debloat\`.
 
 Example remote command:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode
 ```
 
 If you are working directly on the machine, use the standalone helpdesk launcher:
@@ -476,9 +474,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 `IntuneMode` is intended for device-context execution on a newly provisioned corporate machine.
 
-When `IntuneMode` runs, it also stages the helpdesk copy locally to:
-- `C:\<domain>\Scripts`
-- fallback: `C:\Default\Scripts`
+When `IntuneMode` runs, it also stages the helpdesk copy locally to `C:\ProgramData\Windows11Debloat\`.
 
 Staged files include the script, vendor profile JSON, helpdesk launcher, and README.
 
@@ -820,20 +816,20 @@ Use these commands directly in script runners, package install commands, or remo
 |---|---|---|---|
 | Intune Win32 app | Install command | SYSTEM (64-bit) | `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -IntuneMode` |
 | ManageEngine MDM | Script command / deployment command | SYSTEM / Administrator | `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -IntuneMode` |
-| Atera | Script body / command field | User remediation after updates | `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
-| NinjaOne | Script body / parameters | User remediation after updates | `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
-| Hexnode | Run Script action / policy script command | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
-| Pulseway | Automation workflow script step | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
-| LogMeIn Resolve | Script execution task | User remediation after updates | `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
-| Datto RMM | Component script command | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
-| Auvik | Script task / integration command | User remediation after updates | `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
-| Syncro | Script module command | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
-| Action1 | Script deployment command | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\<domain>\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| Atera | Script body / command field | User remediation after updates | `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| NinjaOne | Script body / parameters | User remediation after updates | `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| Hexnode | Run Script action / policy script command | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| Pulseway | Automation workflow script step | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| LogMeIn Resolve | Script execution task | User remediation after updates | `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| Datto RMM | Component script command | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| Auvik | Script task / integration command | User remediation after updates | `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| Syncro | Script module command | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
+| Action1 | Script deployment command | SYSTEM for baseline, user-focused for reruns | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Rerun: `powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User` |
 | Other RMM | Script command field | Baseline: Device, recurring: User | Baseline: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device`<br>Recurring: `powershell.exe -ExecutionPolicy Bypass -File .\\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope User -HelpdeskMode` |
 
-If your domain-staged path is unavailable, use:
+If the staged path is not present yet, use the bootstrap to provision it first, then run:
 
-`powershell.exe -ExecutionPolicy Bypass -File "C:\\Default\\Scripts\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User`
+`powershell.exe -ExecutionPolicy Bypass -File "C:\\ProgramData\\Windows11Debloat\\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User`
 
 ```powershell
 # Intune initial deployment (device context)
@@ -843,34 +839,31 @@ powershell.exe -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -AutoDetect 
 powershell.exe -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -IntuneMode
 
 # Atera post-update remediation (user-focused cleanup from staged copy)
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # NinjaOne post-update remediation (user-focused cleanup from staged copy)
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # Hexnode post-update remediation
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # Pulseway post-update remediation
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # LogMeIn Resolve post-update remediation
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # Datto RMM post-update remediation
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # Auvik post-update remediation
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # Syncro post-update remediation
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # Action1 post-update remediation
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
-
-# Fallback when domain path is not available
-powershell.exe -ExecutionPolicy Bypass -File "C:\Default\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 
 # Generic RMM baseline run (device phase only)
 powershell.exe -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -AutoDetect -IncludeCommon -CleanupScope Device
@@ -920,13 +913,7 @@ powershell.exe -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -AutoDetect 
 2. Recurring remediation run in user-focused mode:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
-```
-
-3. If domain path is unavailable, use fallback:
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File "C:\Default\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 ```
 
 1. Package these files into your `.intunewin` payload:
@@ -949,7 +936,7 @@ powershell.exe -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -AutoDetect 
 6. For post-update remediation, run a follow-up script in user context or remote tool with:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 ```
 
 ### ManageEngine MDM
@@ -975,13 +962,7 @@ Best practice:
 Recommended remote command:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "C:\<domain>\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
-```
-
-If the staged path is not present yet, use fallback:
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File "C:\Default\Scripts\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
+powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 ```
 
 ### Other RMM software (generic pattern)
@@ -1042,7 +1023,7 @@ Then append your vendor alias entry inside the existing `ManufacturerAliases` ob
 - `HelpdeskMode` is best for rerunning cleanup after feature updates or Store re-installs on an already deployed device.
 - `IntuneMode` is best for new-machine deployment under SYSTEM context.
 - On fresh Intune devices, some `winget` or per-user removals may need a later user-context remediation pass.
-- `IntuneMode` stages a local helpdesk copy under `C:\<domain>\Scripts` so technicians can rerun remediation after updates.
+- `IntuneMode` stages a local helpdesk copy under `C:\ProgramData\Windows11Debloat\` so technicians can rerun remediation after updates.
 - The script writes a detection marker registry key by default at `HKLM:\SOFTWARE\Windows11Debloat`.
 - Marker values include last status, exit code, vendor, cleanup scope, run mode, run context, and phase completion states.
 - Default exit codes: `0` success, `10` elevation required, `11` invalid configuration, `12` auto-detect failure, `20` runtime failure.
