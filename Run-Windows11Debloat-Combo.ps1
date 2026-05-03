@@ -24,24 +24,7 @@ param(
     [string]$ProfilesPath,
 
     [Parameter(Mandatory = $false)]
-    [string]$ScriptPath
-
-    ,
-    [Parameter(Mandatory = $false)]
-    [switch]$RecordTicketResult,
-
-    [Parameter(Mandatory = $false)]
-    [ValidateSet('Jira', 'Atera', 'NinjaRMM', 'NinjaOne', 'ServiceNow', 'Freshservice', 'Zendesk', 'ManageEngineSDP', 'ConnectWiseManage', 'AutotaskPSA', 'HaloITSM', 'Other')]
-    [string]$TicketSystem,
-
-    [Parameter(Mandatory = $false)]
-    [string]$TicketNotifyEmail,
-
-    [Parameter(Mandatory = $false)]
-    [string]$TicketRing,
-
-    [Parameter(Mandatory = $false)]
-    [string]$TicketingConfigPath,
+    [string]$ScriptPath,
 
     [Parameter(Mandatory = $false)]
     [switch]$EnableScheduledRerun,
@@ -99,16 +82,6 @@ $RmmDefaults = @{
     ProfilesPath       = ''                            # Example: 'C:\ProgramData\Windows11Debloat\vendor-profiles.json'
     ScriptPath         = ''                            # Example: 'C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1'
 
-    # --- Ticketing (agnostic) ---
-    # Set RecordTicketResult = $true and choose any supported TicketSystem.
-    # Supported values: Jira, ServiceNow, Freshservice, Zendesk, Atera,
-    #                   NinjaOne, NinjaRMM, ManageEngineSDP, ConnectWiseManage,
-    #                   AutotaskPSA, HaloITSM, Other
-    RecordTicketResult  = $false                       # $true to create a ticket/event after each run
-    TicketSystem        = ''                           # Example: 'ServiceNow'
-    TicketNotifyEmail   = ''                           # Example: 'helpdesk@contoso.com'
-    TicketRing          = ''                           # Example: 'Ring1'
-    TicketingConfigPath = ''                           # Example: 'C:\ProgramData\Windows11Debloat\jira-config.json'
     EnableScheduledRerun        = $false               # $true to create a local fallback scheduled task for recurring reruns
     ScheduleIntervalDays        = 30                  # How often the fallback interval task runs
     ScheduleDelayMinutes        = 45                  # Delay before the first interval run and after Windows Update events
@@ -118,9 +91,6 @@ $RmmDefaults = @{
     ScheduleDayOfMonth           = 15                  # Day of month for MonthlyFixedDay trigger (1-28)
     ScheduleWeekOfMonth          = '2'                 # Week of month for MonthlyDayOfWeek trigger: '1','2','3','4','Last'
     ScheduleDayOfWeek            = 'Wednesday'         # Day of week for MonthlyDayOfWeek trigger: Monday-Sunday
-    # Note: Jira REST API credentials are configured via Ticketing-Setup.ps1 -Action Setup
-    # or set in jira-config.json. No Jira fields are needed here unless you use
-    # Intune-Bootstrap-Windows11Debloat.ps1 which passes them directly.
 }
 
 if (-not $PSBoundParameters.ContainsKey('Stage')) { $Stage = $RmmDefaults.Stage }
@@ -131,11 +101,6 @@ if (-not $PSBoundParameters.ContainsKey('IncludeCommon')) { $IncludeCommon = $Rm
 if (-not $PSBoundParameters.ContainsKey('UseIntuneMode')) { $UseIntuneMode = $RmmDefaults.UseIntuneMode }
 if (-not $PSBoundParameters.ContainsKey('ProfilesPath')) { $ProfilesPath = $RmmDefaults.ProfilesPath }
 if (-not $PSBoundParameters.ContainsKey('ScriptPath')) { $ScriptPath = $RmmDefaults.ScriptPath }
-if (-not $PSBoundParameters.ContainsKey('RecordTicketResult')) { $RecordTicketResult = $RmmDefaults.RecordTicketResult }
-if (-not $PSBoundParameters.ContainsKey('TicketSystem')) { $TicketSystem = $RmmDefaults.TicketSystem }
-if (-not $PSBoundParameters.ContainsKey('TicketNotifyEmail')) { $TicketNotifyEmail = $RmmDefaults.TicketNotifyEmail }
-if (-not $PSBoundParameters.ContainsKey('TicketRing')) { $TicketRing = $RmmDefaults.TicketRing }
-if (-not $PSBoundParameters.ContainsKey('TicketingConfigPath')) { $TicketingConfigPath = $RmmDefaults.TicketingConfigPath }
 if (-not $PSBoundParameters.ContainsKey('EnableScheduledRerun')) { $EnableScheduledRerun = $RmmDefaults.EnableScheduledRerun }
 if (-not $PSBoundParameters.ContainsKey('ScheduleIntervalDays')) { $ScheduleIntervalDays = $RmmDefaults.ScheduleIntervalDays }
 if (-not $PSBoundParameters.ContainsKey('ScheduleDelayMinutes')) { $ScheduleDelayMinutes = $RmmDefaults.ScheduleDelayMinutes }
@@ -181,74 +146,6 @@ function Format-ArgumentForPreview {
     }
 
     return $Value
-}
-
-function Invoke-TicketResultRecording {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$RootPath,
-
-        [Parameter(Mandatory = $true)]
-        [int]$DebloatExitCode,
-
-        [Parameter(Mandatory = $true)]
-        [string]$RunStage,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Scope,
-
-        [Parameter(Mandatory = $true)]
-        [string]$DebloatCommand
-    )
-
-    $ticketScriptPath = Join-Path -Path $RootPath -ChildPath 'Ticketing-Setup.ps1'
-    if (-not (Test-Path -Path $ticketScriptPath)) {
-        Write-Host "[WARN] Ticket result recording requested, but ticket helper was not found at '$ticketScriptPath'."
-        return
-    }
-
-    $status = if ($DebloatExitCode -eq 0) { 'Success' } else { 'Failure' }
-    $deviceName = $env:COMPUTERNAME
-    if ([string]::IsNullOrWhiteSpace($deviceName)) {
-        $deviceName = 'UnknownDevice'
-    }
-
-    $summary = "Windows11Debloat $status - $deviceName - Stage:$RunStage Scope:$Scope Exit:$DebloatExitCode"
-    $description = "Command: $DebloatCommand"
-
-    $ticketParams = @{
-        Action = 'CreateTicket'
-        Summary = $summary
-        Description = $description
-        DeviceName = $deviceName
-        Stage = $RunStage
-        CleanupScope = $Scope
-        ExitCode = $DebloatExitCode
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($TicketRing)) {
-        $ticketParams.Ring = $TicketRing
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($TicketSystem)) {
-        $ticketParams.SystemName = $TicketSystem
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($TicketNotifyEmail)) {
-        $ticketParams.NotifyEmail = $TicketNotifyEmail
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($TicketingConfigPath)) {
-        $ticketParams.ConfigPath = $TicketingConfigPath
-    }
-
-    try {
-        & $ticketScriptPath @ticketParams
-        Write-Host '[INFO] Ticket result recording completed.'
-    }
-    catch {
-        Write-Host "[WARN] Ticket result recording failed. $($_.Exception.Message)"
-    }
 }
 
 function Get-RecurringTaskDefinitions {
@@ -313,22 +210,7 @@ function Get-ComboTaskArguments {
         [bool]$IsIntuneMode,
 
         [Parameter(Mandatory = $false)]
-        [string]$ResolvedProfilesPath,
-
-        [Parameter(Mandatory = $true)]
-        [bool]$ShouldRecordTicketResult,
-
-        [Parameter(Mandatory = $false)]
-        [string]$ResolvedTicketSystem,
-
-        [Parameter(Mandatory = $false)]
-        [string]$ResolvedTicketNotifyEmail,
-
-        [Parameter(Mandatory = $false)]
-        [string]$ResolvedTicketRing,
-
-        [Parameter(Mandatory = $false)]
-        [string]$ResolvedTicketingConfigPath
+        [string]$ResolvedProfilesPath
     )
 
     $taskArgs = [System.Collections.Generic.List[string]]::new()
@@ -361,26 +243,6 @@ function Get-ComboTaskArguments {
     if (-not [string]::IsNullOrWhiteSpace($ResolvedProfilesPath)) {
         $taskArgs.Add('-ProfilesPath')
         $taskArgs.Add($ResolvedProfilesPath)
-    }
-
-    if ($ShouldRecordTicketResult) {
-        $taskArgs.Add('-RecordTicketResult')
-        if (-not [string]::IsNullOrWhiteSpace($ResolvedTicketSystem)) {
-            $taskArgs.Add('-TicketSystem')
-            $taskArgs.Add($ResolvedTicketSystem)
-        }
-        if (-not [string]::IsNullOrWhiteSpace($ResolvedTicketNotifyEmail)) {
-            $taskArgs.Add('-TicketNotifyEmail')
-            $taskArgs.Add($ResolvedTicketNotifyEmail)
-        }
-        if (-not [string]::IsNullOrWhiteSpace($ResolvedTicketRing)) {
-            $taskArgs.Add('-TicketRing')
-            $taskArgs.Add($ResolvedTicketRing)
-        }
-        if (-not [string]::IsNullOrWhiteSpace($ResolvedTicketingConfigPath)) {
-            $taskArgs.Add('-TicketingConfigPath')
-            $taskArgs.Add($ResolvedTicketingConfigPath)
-        }
     }
 
     $taskArgs.Add('-SkipScheduleRegistration')
@@ -709,22 +571,7 @@ function Register-RecurringTasksIfNeeded {
                 [bool]$IsIntuneMode,
 
                 [Parameter(Mandatory = $false)]
-                [string]$ResolvedProfilesPath,
-
-            [Parameter(Mandatory = $true)]
-            [bool]$ShouldRecordTicketResult,
-
-                [Parameter(Mandatory = $false)]
-                [string]$ResolvedTicketSystem,
-
-                [Parameter(Mandatory = $false)]
-                [string]$ResolvedTicketNotifyEmail,
-
-                [Parameter(Mandatory = $false)]
-                [string]$ResolvedTicketRing,
-
-            [Parameter(Mandatory = $false)]
-            [string]$ResolvedTicketingConfigPath
+                [string]$ResolvedProfilesPath
             )
 
         if ($SkipScheduleRegistration) {
@@ -748,7 +595,7 @@ function Register-RecurringTasksIfNeeded {
         }
 
         $taskHostExecutable = Get-TaskHostExecutable
-        $taskArguments = Get-ComboTaskArguments -ComboPath $ComboPath -RunStage $RunStage -Scope $Scope -ResolvedVendor $ResolvedVendor -UseAutoDetect $UseAutoDetect -UseCommonProfile $UseCommonProfile -IsIntuneMode $IsIntuneMode -ResolvedProfilesPath $ResolvedProfilesPath -ShouldRecordTicketResult $ShouldRecordTicketResult -ResolvedTicketSystem $ResolvedTicketSystem -ResolvedTicketNotifyEmail $ResolvedTicketNotifyEmail -ResolvedTicketRing $ResolvedTicketRing -ResolvedTicketingConfigPath $ResolvedTicketingConfigPath
+        $taskArguments = Get-ComboTaskArguments -ComboPath $ComboPath -RunStage $RunStage -Scope $Scope -ResolvedVendor $ResolvedVendor -UseAutoDetect $UseAutoDetect -UseCommonProfile $UseCommonProfile -IsIntuneMode $IsIntuneMode -ResolvedProfilesPath $ResolvedProfilesPath
         $taskArgumentLine = Convert-ArgumentListToCommandLine -Arguments $taskArguments
 
         Remove-RecurringTasks
@@ -827,11 +674,6 @@ $hostExecutable = Resolve-HostExecutable
 $commandPreview = $hostExecutable + ' ' + (($argList | ForEach-Object { Format-ArgumentForPreview -Value $_ }) -join ' ')
 $comboTaskPath = if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) { $PSCommandPath } else { Join-Path -Path $root -ChildPath 'Run-Windows11Debloat-Combo.ps1' }
 
-if ($Stage -eq 'Test' -and -not $RecordTicketResult -and -not [string]::IsNullOrWhiteSpace($TicketNotifyEmail)) {
-    $RecordTicketResult = $true
-    Write-Host '[INFO] Test stage detected with TicketNotifyEmail configured. Enabling RecordTicketResult automatically.'
-}
-
 Write-Host '[INFO] Effective combo settings:'
 Write-Host "[INFO]   Stage: $Stage"
 Write-Host "[INFO]   CleanupScope: $CleanupScope"
@@ -841,11 +683,6 @@ Write-Host "[INFO]   IncludeCommon: $([bool]$IncludeCommon)"
 Write-Host "[INFO]   UseIntuneMode: $([bool]$UseIntuneMode)"
 Write-Host "[INFO]   ProfilesPath: $(if ([string]::IsNullOrWhiteSpace($ProfilesPath)) { '<default>' } else { $ProfilesPath })"
 Write-Host "[INFO]   ScriptPath: $resolvedScriptPath"
-Write-Host "[INFO]   RecordTicketResult: $([bool]$RecordTicketResult)"
-Write-Host "[INFO]   TicketSystem: $(if ([string]::IsNullOrWhiteSpace($TicketSystem)) { '<not-set>' } else { $TicketSystem })"
-Write-Host "[INFO]   TicketNotifyEmail: $(if ([string]::IsNullOrWhiteSpace($TicketNotifyEmail)) { '<not-set>' } else { $TicketNotifyEmail })"
-Write-Host "[INFO]   TicketRing: $(if ([string]::IsNullOrWhiteSpace($TicketRing)) { '<not-set>' } else { $TicketRing })"
-Write-Host "[INFO]   TicketingConfigPath: $(if ([string]::IsNullOrWhiteSpace($TicketingConfigPath)) { '<default>' } else { $TicketingConfigPath })"
 Write-Host "[INFO]   EnableScheduledRerun: $([bool]$EnableScheduledRerun)"
 Write-Host "[INFO]   ScheduleIntervalDays: $ScheduleIntervalDays"
 Write-Host "[INFO]   ScheduleDelayMinutes: $ScheduleDelayMinutes"
@@ -859,7 +696,7 @@ Write-Host "[INFO] Stage: $Stage"
 Write-Host "[INFO] Command: $commandPreview"
 
 if (-not $SkipScheduleRegistration -and $HasIntuneRemediationsLicense) {
-    Register-RecurringTasksIfNeeded -ComboPath $comboTaskPath -RunStage $Stage -Scope $CleanupScope -ResolvedVendor $Vendor -UseAutoDetect ([bool]$AutoDetect -or [string]::IsNullOrWhiteSpace($Vendor)) -UseCommonProfile ([bool]$IncludeCommon -or -not $PSBoundParameters.ContainsKey('IncludeCommon')) -IsIntuneMode ([bool]$UseIntuneMode) -ResolvedProfilesPath $ProfilesPath -ShouldRecordTicketResult ([bool]$RecordTicketResult) -ResolvedTicketSystem $TicketSystem -ResolvedTicketNotifyEmail $TicketNotifyEmail -ResolvedTicketRing $TicketRing -ResolvedTicketingConfigPath $TicketingConfigPath
+    Register-RecurringTasksIfNeeded -ComboPath $comboTaskPath -RunStage $Stage -Scope $CleanupScope -ResolvedVendor $Vendor -UseAutoDetect ([bool]$AutoDetect -or [string]::IsNullOrWhiteSpace($Vendor)) -UseCommonProfile ([bool]$IncludeCommon -or -not $PSBoundParameters.ContainsKey('IncludeCommon')) -IsIntuneMode ([bool]$UseIntuneMode) -ResolvedProfilesPath $ProfilesPath
 }
 
 & $hostExecutable @argList
@@ -869,12 +706,8 @@ if ($null -eq $exitCode) {
     $exitCode = 0
 }
 
-if ($RecordTicketResult) {
-    Invoke-TicketResultRecording -RootPath $root -DebloatExitCode $exitCode -RunStage $Stage -Scope $CleanupScope -DebloatCommand $commandPreview
-}
-
 if ($exitCode -eq 0 -and -not $HasIntuneRemediationsLicense) {
-    Register-RecurringTasksIfNeeded -ComboPath $comboTaskPath -RunStage $Stage -Scope $CleanupScope -ResolvedVendor $Vendor -UseAutoDetect ([bool]$AutoDetect -or [string]::IsNullOrWhiteSpace($Vendor)) -UseCommonProfile ([bool]$IncludeCommon -or -not $PSBoundParameters.ContainsKey('IncludeCommon')) -IsIntuneMode ([bool]$UseIntuneMode) -ResolvedProfilesPath $ProfilesPath -ShouldRecordTicketResult ([bool]$RecordTicketResult) -ResolvedTicketSystem $TicketSystem -ResolvedTicketNotifyEmail $TicketNotifyEmail -ResolvedTicketRing $TicketRing -ResolvedTicketingConfigPath $TicketingConfigPath
+    Register-RecurringTasksIfNeeded -ComboPath $comboTaskPath -RunStage $Stage -Scope $CleanupScope -ResolvedVendor $Vendor -UseAutoDetect ([bool]$AutoDetect -or [string]::IsNullOrWhiteSpace($Vendor)) -UseCommonProfile ([bool]$IncludeCommon -or -not $PSBoundParameters.ContainsKey('IncludeCommon')) -IsIntuneMode ([bool]$UseIntuneMode) -ResolvedProfilesPath $ProfilesPath
 }
 
 Write-Host "[INFO] Exit code: $exitCode"

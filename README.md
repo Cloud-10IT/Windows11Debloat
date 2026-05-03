@@ -55,7 +55,6 @@ All other newly added vendors still use safe empty lists by default, so you can 
 - [Vendor profiles](#dell-xps-profile)
 - [Cleanup scope / Dry run](#cleanup-scope-split)
 - [Enterprise deployment guide (Intune, MDM, RMM, Go/No-Go)](DEPLOY.md)
-- [Ticketing and ITSM integration](TICKETING.md)
 
 </details>
 
@@ -78,7 +77,6 @@ How to use in RMM:
 - Test stage now writes restore artifacts to `C:\ProgramData\Windows11Debloat\Logs\RestorePlans`:
 	- `RemovedApps-<vendor>-<timestamp>.json` (manifest of appx/winget targets)
 	- `Restore-RemovedApps-<vendor>-<timestamp>.ps1` (best-effort reinstall helper)
-- To send ticket/email notifications during Test stage, pass `-TicketNotifyEmail`; combo will auto-enable `-RecordTicketResult` for that run.
 
 ### RMM direct commands
 
@@ -110,11 +108,6 @@ Optional vendor force example:
 powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -Vendor Dell -IncludeCommon -CleanupScope Device
 ```
 
-Ticket-enabled direct command example:
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 -Stage Deploy -AutoDetect -IncludeCommon -CleanupScope User -RecordTicketResult -TicketSystem NinjaOne -TicketRing Ring2 -TicketNotifyEmail helpdesk@contoso.com
-```
 
 ### One-command smoke test harness
 
@@ -139,9 +132,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Run-SmokeTests.ps1 -IncludeDeplo
 Outputs are written to `TestOutput` as both `.log` and `.json` summary files.
 If the session is not elevated, the harness will mark the WhatIf wording check as `SKIP` and continue.
 
-> For full enterprise rollout guidance, ring sign-off, and ticketing integration, see the sub-guides:
+> For full enterprise rollout guidance and ring sign-off, see the sub-guides:
 > - [DEPLOY.md](DEPLOY.md) — Go/No-Go checklist, Intune bootstrap, Remediations blade, MDM and RMM setup
-> - [TICKETING.md](TICKETING.md) — Jira, Atera, ServiceNow, and other ITSM integration
 
 ### Quick standalone helpdesk run
 

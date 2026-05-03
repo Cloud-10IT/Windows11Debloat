@@ -2,8 +2,7 @@
 
 Full instructions for enterprise deployment via Intune, RMM, and MDM.
 
-→ Back to [README.md](README.md)  
-→ Ticketing/ITSM integration: [TICKETING.md](TICKETING.md)
+→ Back to [README.md](README.md)
 
 ---
 
@@ -49,13 +48,13 @@ Use this gate before moving from pilot to broad RMM deployment.
 7. Ring rollout plan confirmed
 - Ring 1: `-Stage Test` only.
 - Ring 2: `-Stage Deploy` for limited subset.
-- Ring 3: Broad deployment after log and ticket review.
+- Ring 3: Broad deployment after log review.
 
 Go decision:
 - Proceed only when all checks above are green.
 - If any check fails, hold rollout and remediate before broad deployment.
 
-### Sign-off template (change ticket)
+### Sign-off template (change record)
 
 1. Change ID: ______
 2. Platform: Intune / NinjaOne / Atera / Action1 / Other
@@ -90,8 +89,8 @@ Go decision:
 ### How sign-off works in Intune
 
 1. Create ringed device groups (Ring 1 pilot, Ring 2 limited, Ring 3 broad).
-2. Assign `-Stage Test` to Ring 1 and review logs, exit codes, and tickets.
-3. Complete sign-off template and record decision in your change ticket.
+2. Assign `-Stage Test` to Ring 1 and review logs and exit codes.
+3. Complete sign-off template and record decision in your change record.
 4. Promote to `-Stage Deploy` for Ring 2 only after sign-off.
 5. Promote to Ring 3 after Ring 2 is stable and re-signed off.
 
@@ -111,10 +110,10 @@ Before uploading scripts into any RMM or Intune policy, edit these files first:
 
 | File | Upload target | What to edit before upload |
 |---|---|---|
-| `Intune-Bootstrap-Windows11Debloat.ps1` | Intune Platform scripts | `$IntuneDefaults` block (URL, hash, stage, scope, vendor mode, ticket settings) |
+| `Intune-Bootstrap-Windows11Debloat.ps1` | Intune Platform scripts | `$IntuneDefaults` block (URL, hash, stage, scope, vendor mode) |
 | `Intune-Detection-Windows11Debloat.ps1` | Intune Remediations (Detection) | `$MaxAgeDays` and optional `$MarkerPath` |
-| `Intune-Remediation-Windows11Debloat.ps1` | Intune Remediations (Remediation) | `$IntuneRemediationDefaults` block (URL, stage, scope, vendor mode, ticket + Jira settings) |
-| `Run-Windows11Debloat-Combo.ps1` | NinjaOne/Atera/Action1/other RMM script jobs | `$RmmDefaults` block (stage, scope, vendor mode, ticket settings) |
+| `Intune-Remediation-Windows11Debloat.ps1` | Intune Remediations (Remediation) | `$IntuneRemediationDefaults` block (URL, stage, scope, vendor mode) |
+| `Run-Windows11Debloat-Combo.ps1` | NinjaOne/Atera/Action1/other RMM script jobs | `$RmmDefaults` block (stage, scope, vendor mode) |
 
 All four scripts print effective runtime settings in logs so helpdesk can confirm exactly what policy values were used.
 
@@ -222,7 +221,6 @@ Edit these fields before upload:
 4. `CleanupScope` = `Device`, `User`, or `All`.
 5. `Vendor` or `AutoDetect` = explicit vendor or automatic vendor detection.
 6. `IncludeCommon` = enable common cross-vendor cleanup when desired.
-7. `RecordTicketResult`, `TicketSystem`, `TicketNotifyEmail`, `TicketRing` = ticketing behavior.
 8. `HasIntuneRemediationsLicense` = `$true` when you will use licensed Intune Remediations.
 9. `EnableScheduledRerun`, `ScheduleTriggerMode`, `ScheduleIntervalDays`, `ScheduleDelayMinutes` = local fallback scheduling only for unlicensed tenants.
    - For monthly patching schedules: set `ScheduleTriggerMode` to `MonthlyDayOfWeek` or `MonthlyFixedDay`
@@ -275,7 +273,6 @@ Key parameters to configure for your environment:
 | `-Stage` | Set inside the uploaded script file (`Test` for pilot policy, `Deploy` for production policy) |
 | `-AutoDetect` | Include — auto-detects Dell / Lenovo / HP / etc. |
 | `-IncludeCommon` | Include — removes common cross-vendor bloatware |
-| `-RecordTicketResult` + `-TicketSystem` | Include if you want an ITSM ticket per device run |
 | `-HasIntuneRemediationsLicense` | Set to true when you will use licensed Intune Remediations for drift correction |
 | `-EnableScheduledRerun` | Set to true only for the unlicensed fallback path |
 | `-ScheduleTriggerMode` | `Interval`, `AfterWindowsUpdate`, `IntervalAndAfterWindowsUpdate`, `MonthlyDayOfWeek`, or `MonthlyFixedDay` |
@@ -346,9 +343,8 @@ When Intune runs the bootstrap, no further helpdesk action is needed:
 
 1. Downloads and verifies the package zip
 2. Extracts and stages **all repository files** to `C:\ProgramData\Windows11Debloat\`
-3. Configures ticketing if `-RecordTicketResult` is set
-4. Runs the debloat combo and writes the result marker to `HKLM:\SOFTWARE\Windows11Debloat`
-5. Writes a transcript log to `C:\ProgramData\Windows11Debloat\Logs\`
+3. Runs the debloat combo and writes the result marker to `HKLM:\SOFTWARE\Windows11Debloat`
+4. Writes a transcript log to `C:\ProgramData\Windows11Debloat\Logs\`
 
 A helpdesk technician remoting to the device afterwards can find everything here:
 
@@ -398,7 +394,7 @@ Before uploading the Remediations scripts you must confirm licensing in your ten
 
 Use **Devices > Scripts and remediations > Remediations** to automatically re-apply the debloat
 on a recurring schedule. This catches newly installed bloatware, corrects settings drift,
-and optionally creates an ITSM ticket each cycle.
+
 
 If you are using this licensed Remediations path, keep the bootstrap fallback scheduler disabled.
 The remediation run automatically removes all previously created local fallback tasks
@@ -429,10 +425,7 @@ Edit these fields before upload:
 4. `CleanupScope` = `Device`, `User`, or `All`.
 5. `Vendor` or `AutoDetect` = explicit vendor or automatic vendor detection.
 6. `IncludeCommon` = enable common cross-vendor cleanup when desired.
-7. `RecordTicketResult`, `TicketSystem`, `TicketNotifyEmail`, `TicketRing`, `TicketingConfigPath` = ticketing behavior.
-8. `HasIntuneRemediationsLicense` = leave as `$true` for the licensed Remediations path.
-
-Uncomment the ticketing parameter lines if you want an ITSM ticket per monthly cycle.
+7. `HasIntuneRemediationsLicense` = leave as `$true` for the licensed Remediations path.
 `HasIntuneRemediationsLicense` is already set to `$true` in this script and should stay that way for the licensed path.
 
 ### Create the Remediations policy in Intune
