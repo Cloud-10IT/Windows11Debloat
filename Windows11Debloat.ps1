@@ -32,7 +32,7 @@ param(
     [string]$MarkerRegistryPath = 'HKLM:\SOFTWARE\Windows11Debloat',
 
     [Parameter(Mandatory = $false)]
-    [string]$LogBasePath = 'C:\Logs',
+    [string]$LogBasePath = 'C:\ProgramData\Windows11Debloat\Logs',
 
     [Parameter(Mandatory = $false)]
     [string]$ScriptCacheBasePath = 'C:\'
@@ -183,27 +183,7 @@ function Get-LogRootPath {
         [string]$BasePath
     )
 
-    $domainName = $null
-
-    try {
-        $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
-        if ($computerSystem.PartOfDomain -and -not [string]::IsNullOrWhiteSpace($computerSystem.Domain)) {
-            $domainName = [string]$computerSystem.Domain
-        }
-    }
-    catch {
-    }
-
-    if ([string]::IsNullOrWhiteSpace($domainName) -and -not [string]::IsNullOrWhiteSpace($env:USERDOMAIN)) {
-        $domainName = $env:USERDOMAIN
-    }
-
-    if ([string]::IsNullOrWhiteSpace($domainName) -or $domainName -eq $env:COMPUTERNAME -or $domainName -eq 'WORKGROUP') {
-        $domainName = 'Default'
-    }
-
-    $safeDomainName = $domainName -replace '[\\/:*?"<>|]', '-'
-    return (Join-Path -Path $BasePath -ChildPath $safeDomainName)
+    return $BasePath
 }
 
 function Resolve-ScriptRootPath {

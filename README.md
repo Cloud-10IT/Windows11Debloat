@@ -41,7 +41,7 @@ All other newly added vendors still use safe empty lists by default, so you can 
 - Applies a small set of safe registry tweaks (only when common profile is included)
 - Disables hibernation (when enabled in Common profile)
 - Disables SSD-often-unneeded services in Common profile (SysMain and Windows Search indexing service)
-- Exports a pre-change safety snapshot on non-dry runs to `C:\Logs\<domain>\Snapshots` (fallback: `C:\Logs\Default\Snapshots`)
+- Exports a pre-change safety snapshot on non-dry runs to `C:\ProgramData\Windows11Debloat\Logs\Snapshots`
 
 ## Run (PowerShell As Administrator)
 
@@ -61,7 +61,7 @@ How to use in RMM:
 - Pilot ring: run `-Stage Test` first and validate summary/log output.
 - Production ring: switch only `-Stage Deploy` and keep the same vendor/scope arguments.
 - Recurring post-update cleanup: set `-CleanupScope User` for user-context reruns.
-- Test stage now writes restore artifacts to `C:\Logs\<domain>\RestorePlans` (fallback `C:\Logs\Default\RestorePlans`):
+- Test stage now writes restore artifacts to `C:\ProgramData\Windows11Debloat\Logs\RestorePlans`:
 	- `RemovedApps-<vendor>-<timestamp>.json` (manifest of appx/winget targets)
 	- `Restore-RemovedApps-<vendor>-<timestamp>.ps1` (best-effort reinstall helper)
 - To send ticket/email notifications during Test stage, pass `-TicketNotifyEmail`; combo will auto-enable `-RecordTicketResult` for that run.
@@ -138,7 +138,7 @@ Use this gate before moving from pilot to broad RMM deployment.
 - Confirm expected app/service/task changes and no critical business tools removed.
 
 3. Snapshot and marker verification completed
-- Confirm pre-change snapshot file exists under `C:\Logs\<domain>\Snapshots` (fallback: `C:\Logs\Default\Snapshots`).
+- Confirm pre-change snapshot file exists under `C:\ProgramData\Windows11Debloat\Logs\Snapshots`.
 - Confirm marker key updates under `HKLM:\SOFTWARE\Windows11Debloat`.
 
 4. Context coverage validated
@@ -184,7 +184,7 @@ Go decision:
 
 2. State verification evidence
 - At least 1 marker verification capture (`HKLM:\SOFTWARE\Windows11Debloat`).
-- At least 1 pre-change snapshot file confirmed in `C:\Logs\<domain>\Snapshots` (or `C:\Logs\Default\Snapshots`).
+- At least 1 pre-change snapshot file confirmed in `C:\ProgramData\Windows11Debloat\Logs\Snapshots`.
 
 3. Outcome quality evidence
 - No critical-severity helpdesk incidents attributed to the rollout during pilot window.
@@ -441,7 +441,7 @@ Or run the script directly:
 - default to `-AutoDetect` when no vendor is specified
 - default to `-IncludeCommon` when not specified
 - suppress confirmation prompts for faster execution
-- write a transcript log to `C:\Logs\<domain>` and fall back to `C:\Logs\Default`
+- write a transcript log to `C:\ProgramData\Windows11Debloat\Logs`
 
 ### Dell XPS profile
 
@@ -589,7 +589,7 @@ When Intune runs the bootstrap, no further helpdesk action is needed:
 2. Extracts and stages **all repository files** to `C:\ProgramData\Windows11Debloat\`
 3. Configures ticketing if `-RecordTicketResult` is set
 4. Runs the debloat combo and writes the result marker to `HKLM:\SOFTWARE\Windows11Debloat`
-5. Writes a transcript log to `C:\Logs\<domain>\` (fallback: `C:\Logs\Default\`)
+5. Writes a transcript log to `C:\ProgramData\Windows11Debloat\Logs\`
 
 A helpdesk technician remoting to the device afterwards can find everything here:
 
@@ -599,7 +599,7 @@ A helpdesk technician remoting to the device afterwards can find everything here
 | Core debloat script | `C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1` |
 | One-click helpdesk launcher | `C:\ProgramData\Windows11Debloat\Run-Windows11Debloat-Helpdesk.cmd` |
 | Vendor profiles | `C:\ProgramData\Windows11Debloat\vendor-profiles.json` |
-| Run logs | `C:\Logs\<domain>\` or `C:\Logs\Default\` |
+| Run logs | `C:\ProgramData\Windows11Debloat\Logs\` |
 
 To re-run from a remote session:
 
@@ -617,6 +617,24 @@ powershell.exe -ExecutionPolicy Bypass -File .\Run-Windows11Debloat-Combo.ps1 `
 ---
 
 ### Intune monthly re-run — Remediations blade
+
+> **Remediation Scripts — Licensing Statement**
+>
+> Proactive remediation scripts in Microsoft Intune (including detection and remediation scripts) are
+> used only on devices and for users that are licensed with an eligible Windows Enterprise–level
+> license. Each user or device benefiting from remediation scripts is assigned one of the required
+> licenses: **Microsoft 365 F3, E3, or E5**; or **Windows Enterprise E3 or E5**. Microsoft Intune
+> tenant settings are enabled only to support these licensed users and devices.
+
+#### Enable the required Intune tenant setting
+
+Before uploading the Remediations scripts you must confirm licensing in your tenant:
+
+1. In the [Intune admin center](https://intune.microsoft.com), go to **Tenant administration > Windows data**.
+2. Toggle **Enable Windows diagnostic data processor configuration** to **On**.
+3. Check **I confirm that my tenant owns one of these qualifying licenses** and click **Save**.
+
+> Without this step the Remediations blade will not execute detection/remediation scripts on enrolled devices.
 
 Use **Devices > Scripts and remediations > Remediations** to automatically re-apply the debloat
 on a recurring schedule. This catches newly installed bloatware, corrects settings drift,

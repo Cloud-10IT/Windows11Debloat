@@ -4,6 +4,17 @@
 #           package and re-runs the debloat when the detection script exits 1.
 # EDIT     : Find the EDIT BEFORE UPLOAD block below and set your values
 #            before uploading to Devices > Scripts and remediations > Remediations.
+# ----------------------------------------------------------------------------
+# LICENSING — INTUNE REMEDIATIONS
+#   Proactive remediation scripts are used only on devices and users licensed
+#   with an eligible Windows Enterprise-level license. Each device/user must
+#   hold one of: Microsoft 365 F3, E3, or E5; or Windows Enterprise E3 or E5.
+#   Intune tenant settings are enabled only for these licensed users/devices.
+#
+#   Required tenant setting (one-time, per tenant):
+#     Intune admin center → Tenant administration → Windows data
+#       ☑ Enable Windows diagnostic data processor configuration  (set to On)
+#       ☑ I confirm that my tenant owns one of these qualifying licenses
 # ============================================================================
 
 Set-StrictMode -Version Latest
