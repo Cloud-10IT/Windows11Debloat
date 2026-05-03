@@ -1,0 +1,43 @@
+{
+  "_setup": [
+    "Auth.Primary uses OAuth2 (preferred). Auth.Fallback uses BasicAuth if OAuth2 is unavailable.",
+    "",
+    "OAuth2 setup (Primary):",
+    "  1. Go to https://developer.atlassian.com/console/myapps/ and open your app (e.g. EntraID-API-Tickets).",
+    "  2. Under Settings, copy the Client ID and Client Secret — store the secret in Azure Key Vault.",
+    "  3. Call GET https://<your-site>.atlassian.net/_edge/tenant_info to get your CloudId.",
+    "  4. Fill in Auth.Primary.ClientId and CloudId below; reference the secret from Key Vault at runtime.",
+    "  Authorization header: Bearer <access-token>",
+    "",
+    "BasicAuth setup (Fallback):",
+    "  1. Log in to Jira as the service/automation account.",
+    "  2. Go to https://id.atlassian.com/manage-profile/security/api-tokens and create a token.",
+    "  3. Fill in Auth.Fallback.UserEmail; store the token in Azure Key Vault.",
+    "  Authorization header: Basic base64(email:token)"
+  ],
+  "SystemName": "Other",
+  "NotifyEmail": "helpdesk@contoso.com",
+  "Jira": {
+    "BaseUrl": "https://your-site.atlassian.net",
+    "ProjectKey": "SCRUM",
+    "IssueType": "Incident",
+    "Auth": {
+      "Primary": {
+        "Method": "OAuth2",
+        "ClientId": "your-client-id",
+        "ClientSecret": "stored-in-azure-key-vault",
+        "AuthorizationUrl": "https://auth.atlassian.com/authorize",
+        "TokenUrl": "https://auth.atlassian.com/oauth/token",
+        "Scopes": ["read:jira-work", "write:jira-work"],
+        "CloudId": "your-cloud-id",
+        "ApiBaseUrl": "https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3"
+      },
+      "Fallback": {
+        "Method": "BasicAuth",
+        "UserEmail": "jira-automation@yourdomain.com",
+        "ApiToken": "stored-in-azure-key-vault",
+        "ApiBaseUrl": "https://your-site.atlassian.net/rest/api/3"
+      }
+    }
+  }
+}

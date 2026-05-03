@@ -462,6 +462,8 @@ function Copy-HelpdeskArtifacts {
         'Windows11Debloat.ps1',
         'vendor-profiles.json',
         'Run-Windows11Debloat-Helpdesk.cmd',
+        'Run-Windows11Debloat-HomeUser.ps1',
+        'Run-Windows11Debloat-HomeUser.cmd',
         'README.md'
     )
 

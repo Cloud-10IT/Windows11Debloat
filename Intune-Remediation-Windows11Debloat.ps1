@@ -47,7 +47,7 @@ $IntuneRemediationDefaults = @{
     TicketSystem        = ''                           # Example: 'ServiceNow'
     TicketNotifyEmail   = ''                           # Example: 'helpdesk@contoso.com'
     TicketRing          = ''                           # Example: 'Ring2'
-    TicketingConfigPath = ''                           # Example: 'C:\ProgramData\Windows11Debloat\ticketing-config.json'
+    TicketingConfigPath = ''                           # Example: 'C:\ProgramData\Windows11Debloat\jira-config.json'
 
     # --- Jira-specific (only used when TicketSystem = 'Jira') ---
     JiraBaseUrl        = ''                            # Example: 'https://contoso.atlassian.net'

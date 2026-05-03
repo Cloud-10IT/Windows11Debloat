@@ -82,7 +82,7 @@ function Get-ConfigPath {
     }
 
     $root = Resolve-RootPath
-    return (Join-Path -Path $root -ChildPath 'ticketing-config.json')
+    return (Join-Path -Path $root -ChildPath 'jira-config.json')
 }
 
 function Load-Config {

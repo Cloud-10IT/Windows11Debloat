@@ -108,7 +108,7 @@ $RmmDefaults = @{
     TicketSystem        = ''                           # Example: 'ServiceNow'
     TicketNotifyEmail   = ''                           # Example: 'helpdesk@contoso.com'
     TicketRing          = ''                           # Example: 'Ring1'
-    TicketingConfigPath = ''                           # Example: 'C:\ProgramData\Windows11Debloat\ticketing-config.json'
+    TicketingConfigPath = ''                           # Example: 'C:\ProgramData\Windows11Debloat\jira-config.json'
     EnableScheduledRerun        = $false               # $true to create a local fallback scheduled task for recurring reruns
     ScheduleIntervalDays        = 30                  # How often the fallback interval task runs
     ScheduleDelayMinutes        = 45                  # Delay before the first interval run and after Windows Update events
@@ -119,7 +119,7 @@ $RmmDefaults = @{
     ScheduleWeekOfMonth          = '2'                 # Week of month for MonthlyDayOfWeek trigger: '1','2','3','4','Last'
     ScheduleDayOfWeek            = 'Wednesday'         # Day of week for MonthlyDayOfWeek trigger: Monday-Sunday
     # Note: Jira REST API credentials are configured via Ticketing-Setup.ps1 -Action Setup
-    # or set in ticketing-config.json. No Jira fields are needed here unless you use
+    # or set in jira-config.json. No Jira fields are needed here unless you use
     # Intune-Bootstrap-Windows11Debloat.ps1 which passes them directly.
 }
 
