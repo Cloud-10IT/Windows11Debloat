@@ -520,6 +520,29 @@ Use this path if you want the simplest setup for admins and helpdesk teams.
 	- `ScheduleWeekOfMonth`, `ScheduleDayOfWeek` = required when using `MonthlyDayOfWeek` (e.g. `'2'`, `'Wednesday'` = 2nd Wednesday)
 	- `ScheduleDayOfMonth` = required when using `MonthlyFixedDay` (e.g. `15` = 15th of each month)
 	- `AlsoRunAfterWindowsUpdate` = `$true` to also register the Windows Update event trigger alongside any monthly trigger
+
+	<details>
+	<summary><strong>Example: Intune defaults block values</strong></summary>
+
+	```powershell
+	# Example values to place in the IntuneDefaults block before upload
+	PackageZipUrl               = 'https://contoso.blob.core.windows.net/deploy/Windows11Debloat.zip?<sas-token>'
+	PackageZipSha256            = '6E3B1B2B8E8A3F0D6A1D7A90F1A5E2B7A0BEE21D29F13F467E8D7017D55C8A10'
+	Stage                       = 'Deploy'
+	CleanupScope                = 'Device'
+	AutoDetect                  = $true
+	IncludeCommon               = $true
+	HasIntuneRemediationsLicense = $false
+	EnableScheduledRerun        = $true
+	ScheduleTriggerMode         = 'MonthlyDayOfWeek'
+	ScheduleWeekOfMonth         = '2'
+	ScheduleDayOfWeek           = 'Wednesday'
+	ScheduleDelayMinutes        = 45
+	AlsoRunAfterWindowsUpdate   = $true
+	```
+
+	</details>
+
 2. In Intune, go to **Devices > Scripts and remediations > Platform scripts > Add**.
 3. Upload `Intune-Bootstrap-Windows11Debloat.ps1` with these settings:
 	- Run this script using the logged on credentials: **No**
