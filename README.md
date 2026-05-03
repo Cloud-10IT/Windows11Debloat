@@ -45,6 +45,17 @@ All other newly added vendors still use safe empty lists by default, so you can 
 
 ## Run (PowerShell As Administrator)
 
+<details>
+<summary><strong>Expand quick navigation</strong></summary>
+
+- [Combo pilot-to-RMM workflow](#combo-pilot-to-rmm-workflow)
+- [RMM direct commands](#rmm-direct-commands)
+- [Intune single-file bootstrap mode](#intune-single-file-bootstrap-mode--upload-one-file-all-scripts-auto-created-on-device)
+- [Intune monthly re-run - Remediations blade](#intune-monthly-re-run--remediations-blade)
+- [MDM and RMM Setup](#mdm-and-rmm-setup)
+
+</details>
+
 ### Combo pilot-to-RMM workflow
 
 Use one launcher for both pre-deployment validation and production rollout:
@@ -855,6 +866,9 @@ Quiet dry run (summary only):
 
 Use this section to operationalize deployment in enterprise tooling.
 
+<details>
+<summary><strong>Expand ready-to-paste commands (all platforms)</strong></summary>
+
 ### Ready-to-paste commands
 
 Use these commands directly in script runners, package install commands, or remote execute actions.
@@ -930,9 +944,14 @@ powershell.exe -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -Vendor Leno
 powershell.exe -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -Vendor HP -IncludeCommon -CleanupScope Device
 ```
 
+</details>
+
 ### Microsoft Intune (Win32 app)
 
 ### Recommended schedule
+
+<details>
+<summary><strong>Expand recommended cadence matrix</strong></summary>
 
 Use this cadence to keep systems clean when updates reintroduce apps.
 
@@ -962,6 +981,8 @@ powershell.exe -ExecutionPolicy Bypass -File .\Windows11Debloat.ps1 -AutoDetect 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\Windows11Debloat\Windows11Debloat.ps1" -HelpdeskMode -CleanupScope User
 ```
+
+</details>
 
 1. Package these files into your `.intunewin` payload:
 	- `Windows11Debloat.ps1`
