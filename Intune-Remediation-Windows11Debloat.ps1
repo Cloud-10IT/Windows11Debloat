@@ -55,6 +55,7 @@ $IntuneRemediationDefaults = @{
     JiraIssueType      = 'Incident'                    # Example: 'Incident'
     JiraUserEmail      = ''                            # Example: 'jira-bot@contoso.com'
     JiraApiToken       = ''                            # Example: 'ATATTxxxxxxxxxxxxxxxx'
+    HasIntuneRemediationsLicense = $true              # Remediations is the licensed path; local fallback tasks are removed/ignored
 }
 
 $PackageZipUrl = $IntuneRemediationDefaults.PackageZipUrl
@@ -76,6 +77,7 @@ $JiraProjectKey = $IntuneRemediationDefaults.JiraProjectKey
 $JiraIssueType = $IntuneRemediationDefaults.JiraIssueType
 $JiraUserEmail = $IntuneRemediationDefaults.JiraUserEmail
 $JiraApiToken = $IntuneRemediationDefaults.JiraApiToken
+$HasIntuneRemediationsLicense = $IntuneRemediationDefaults.HasIntuneRemediationsLicense
 
 if ([string]::IsNullOrWhiteSpace($PackageZipUrl) -or $PackageZipUrl -like 'https://your-storage.example.com/*') {
     throw "PackageZipUrl is not configured. Edit Intune-Remediation-Windows11Debloat.ps1 before uploading to Intune."
@@ -142,6 +144,7 @@ Write-Info "  JiraProjectKey: $(if ([string]::IsNullOrWhiteSpace($JiraProjectKey
 Write-Info "  JiraIssueType: $(if ([string]::IsNullOrWhiteSpace($JiraIssueType)) { '<not-set>' } else { $JiraIssueType })"
 Write-Info "  JiraUserEmail: $(if ([string]::IsNullOrWhiteSpace($JiraUserEmail)) { '<not-set>' } else { $JiraUserEmail })"
 Write-Info "  JiraApiToken: $(Get-MaskedValue -Value $JiraApiToken)"
+Write-Info "  HasIntuneRemediationsLicense: $([bool]$HasIntuneRemediationsLicense)"
 
 try {
     New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
@@ -249,6 +252,10 @@ try {
             $argList.Add('-TicketingConfigPath')
             $argList.Add($TicketingConfigPath)
         }
+    }
+
+    if ($HasIntuneRemediationsLicense) {
+        $argList.Add('-HasIntuneRemediationsLicense')
     }
 
     Write-Info 'Running debloat combo'

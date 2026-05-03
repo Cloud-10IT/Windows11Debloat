@@ -501,7 +501,14 @@ All four scripts now print effective runtime settings in logs so helpdesk can co
 
 Use this path if you want the simplest setup for admins and helpdesk teams.
 
-1. Edit `Intune-Bootstrap-Windows11Debloat.ps1` and set `PackageZipUrl` to your hosted zip URL.
+1. Edit `Intune-Bootstrap-Windows11Debloat.ps1`.
+	Set these fields in the `EDIT BEFORE UPLOAD TO INTUNE` block:
+	- `PackageZipUrl` = your hosted zip URL
+	- `PackageZipSha256` = your SHA-256 hash if you want integrity verification
+	- `Stage` = `Test` for pilot or `Deploy` for production
+	- `HasIntuneRemediationsLicense` = `$true` if you will use licensed Intune Remediations for recurring runs
+	- `EnableScheduledRerun` = `$true` only when you do **not** have Remediations licensing and want a local fallback scheduled task
+	- `ScheduleIntervalDays`, `ScheduleDelayMinutes`, `ScheduleTriggerMode` = fallback task cadence/delay settings when `EnableScheduledRerun` is enabled
 2. In Intune, go to **Devices > Scripts and remediations > Platform scripts > Add**.
 3. Upload `Intune-Bootstrap-Windows11Debloat.ps1` with these settings:
 	- Run this script using the logged on credentials: **No**
@@ -541,6 +548,27 @@ Before uploading to Intune, open `Intune-Bootstrap-Windows11Debloat.ps1` and set
 `-PackageZipUrl` (and optionally `-PackageZipSha256`) as the default parameter values,
 since Intune Platform scripts do not support passing arguments to uploaded scripts.
 
+Edit these fields before upload:
+
+1. `PackageZipUrl` = required hosted zip URL.
+2. `PackageZipSha256` = optional but recommended package hash.
+3. `Stage` = `Test` for pilot policy or `Deploy` for production policy.
+4. `CleanupScope` = `Device`, `User`, or `All`.
+5. `Vendor` or `AutoDetect` = explicit vendor or automatic vendor detection.
+6. `IncludeCommon` = enable common cross-vendor cleanup when desired.
+7. `RecordTicketResult`, `TicketSystem`, `TicketNotifyEmail`, `TicketRing` = ticketing behavior.
+8. `HasIntuneRemediationsLicense` = `$true` when you will use licensed Intune Remediations.
+9. `EnableScheduledRerun`, `ScheduleIntervalDays`, `ScheduleDelayMinutes`, `ScheduleTriggerMode` = local fallback scheduling only for unlicensed tenants.
+
+If the tenant does **not** have eligible Intune Remediations licensing, you can also enable the
+local fallback scheduler in this same defaults block. The fallback supports:
+
+- An every-`N`-days interval trigger
+- A best-effort event trigger after Windows Update completion events (`Microsoft-Windows-WindowsUpdateClient` event IDs `19`, `43`, and `44`)
+- A configurable delay in minutes before the rerun starts
+
+If `HasIntuneRemediationsLicense = $true`, the combo script ignores the fallback scheduler and removes any previously created local tasks.
+
 Important: Intune **Assignments** only chooses target groups. It does **not** pass `-Stage` or any other script arguments.
 To use rings (`Test` then `Deploy`), you publish separate script files/policies.
 
@@ -560,6 +588,9 @@ Key parameters to configure for your environment:
 | `-AutoDetect` | Include — auto-detects Dell / Lenovo / HP / etc. |
 | `-IncludeCommon` | Include — removes common cross-vendor bloatware |
 | `-RecordTicketResult` + `-TicketSystem` | Include if you want an ITSM ticket per device run |
+| `-HasIntuneRemediationsLicense` | Set to true when you will use licensed Intune Remediations for drift correction |
+| `-EnableScheduledRerun` | Set to true only for the unlicensed fallback path |
+| `-ScheduleIntervalDays` / `-ScheduleDelayMinutes` / `-ScheduleTriggerMode` | Controls the local fallback scheduled task cadence |
 
 #### Step 3 — Upload to Devices > Scripts and remediations
 
@@ -580,6 +611,26 @@ In **Assignments**, scope each policy to the right device group:
 
 > **Note:** Platform scripts run **once** per device on policy assignment. Use this for initial provisioning.
 > For monthly automatic re-runs (drift correction), use the Remediations blade described below.
+
+If you do **not** have eligible Intune Remediations licensing, use the fallback local scheduled task instead by enabling
+`EnableScheduledRerun` in `Intune-Bootstrap-Windows11Debloat.ps1`. When enabled, the combo registers one or both of these triggers:
+
+- Every `ScheduleIntervalDays` days
+- After Windows Update completion events, delayed by `ScheduleDelayMinutes`
+
+Helpdesk verification for fallback tasks:
+
+```powershell
+Get-ScheduledTask -TaskName 'Windows11Debloat-Recurring','Windows11Debloat-AfterWindowsUpdate' -ErrorAction SilentlyContinue |
+	Select-Object TaskName, State, TaskPath
+```
+
+Helpdesk cleanup for fallback tasks:
+
+```powershell
+Unregister-ScheduledTask -TaskName 'Windows11Debloat-Recurring' -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'Windows11Debloat-AfterWindowsUpdate' -Confirm:$false -ErrorAction SilentlyContinue
+```
 
 #### What gets created on the device automatically
 
@@ -640,6 +691,10 @@ Use **Devices > Scripts and remediations > Remediations** to automatically re-ap
 on a recurring schedule. This catches newly installed bloatware, corrects settings drift,
 and optionally creates an ITSM ticket each cycle.
 
+If you are using this licensed Remediations path, keep the bootstrap fallback scheduler disabled.
+The remediation run automatically removes previously created `Windows11Debloat-Recurring` and
+`Windows11Debloat-AfterWindowsUpdate` local tasks so only one recurring mechanism remains active.
+
 Two scripts are provided for this blade:
 
 | File | Role |
@@ -656,7 +711,19 @@ $PackageZipUrl    = 'https://your-storage.example.com/Windows11Debloat.zip'
 $PackageZipSha256 = 'YOUR_SHA256_HASH'   # or leave blank to skip verification
 ```
 
+Edit these fields before upload:
+
+1. `PackageZipUrl` = required hosted zip URL.
+2. `PackageZipSha256` = optional but recommended package hash.
+3. `Stage` = normally leave as `Deploy`.
+4. `CleanupScope` = `Device`, `User`, or `All`.
+5. `Vendor` or `AutoDetect` = explicit vendor or automatic vendor detection.
+6. `IncludeCommon` = enable common cross-vendor cleanup when desired.
+7. `RecordTicketResult`, `TicketSystem`, `TicketNotifyEmail`, `TicketRing`, `TicketingConfigPath` = ticketing behavior.
+8. `HasIntuneRemediationsLicense` = leave as `$true` for the licensed Remediations path.
+
 Uncomment the ticketing parameter lines if you want an ITSM ticket per monthly cycle.
+`HasIntuneRemediationsLicense` is already set to `$true` in this script and should stay that way for the licensed path.
 
 #### Create the Remediations policy in Intune
 
@@ -688,6 +755,11 @@ To change the re-run interval, edit `$MaxAgeDays` in `Intune-Detection-Windows11
 ```powershell
 $MaxAgeDays = 30   # change to 7 for weekly, 90 for quarterly
 ```
+
+Edit these detection fields before upload:
+
+1. `MaxAgeDays` = how old a successful run can be before remediation is triggered.
+2. `MarkerPath` = leave as default unless you intentionally changed the registry marker location.
 
 ---
 

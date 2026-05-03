@@ -60,7 +60,25 @@ param(
     [string]$JiraUserEmail,
 
     [Parameter(Mandatory = $false)]
-    [string]$JiraApiToken
+    [string]$JiraApiToken,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$EnableScheduledRerun,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 365)]
+    [int]$ScheduleIntervalDays = 30,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(0, 240)]
+    [int]$ScheduleDelayMinutes = 45,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Interval', 'AfterWindowsUpdate', 'IntervalAndAfterWindowsUpdate')]
+    [string]$ScheduleTriggerMode = 'IntervalAndAfterWindowsUpdate',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$HasIntuneRemediationsLicense
 )
 
 Set-StrictMode -Version Latest
@@ -103,6 +121,13 @@ $IntuneDefaults = @{
     JiraIssueType      = 'Incident'                    # Example: 'Incident'
     JiraUserEmail      = ''                            # Example: 'jira-bot@contoso.com'
     JiraApiToken       = ''                            # Example: 'ATATTxxxxxxxxxxxxxxxx'
+
+    # --- Fallback scheduling (only when Intune Remediations licensing is not used) ---
+    EnableScheduledRerun         = $false              # $true to create a local scheduled task fallback after a successful Deploy run
+    ScheduleIntervalDays         = 30                  # Interval trigger cadence in days
+    ScheduleDelayMinutes         = 45                  # Delay after registration time and after Windows Update event completion
+    ScheduleTriggerMode          = 'IntervalAndAfterWindowsUpdate' # Interval, AfterWindowsUpdate, or both
+    HasIntuneRemediationsLicense = $false             # $true when you will use licensed Intune Remediations instead of local scheduled tasks
 }
 
 if (-not $PSBoundParameters.ContainsKey('PackageZipUrl')) { $PackageZipUrl = $IntuneDefaults.PackageZipUrl }
@@ -122,6 +147,11 @@ if (-not $PSBoundParameters.ContainsKey('JiraProjectKey')) { $JiraProjectKey = $
 if (-not $PSBoundParameters.ContainsKey('JiraIssueType')) { $JiraIssueType = $IntuneDefaults.JiraIssueType }
 if (-not $PSBoundParameters.ContainsKey('JiraUserEmail')) { $JiraUserEmail = $IntuneDefaults.JiraUserEmail }
 if (-not $PSBoundParameters.ContainsKey('JiraApiToken')) { $JiraApiToken = $IntuneDefaults.JiraApiToken }
+if (-not $PSBoundParameters.ContainsKey('EnableScheduledRerun')) { $EnableScheduledRerun = $IntuneDefaults.EnableScheduledRerun }
+if (-not $PSBoundParameters.ContainsKey('ScheduleIntervalDays')) { $ScheduleIntervalDays = $IntuneDefaults.ScheduleIntervalDays }
+if (-not $PSBoundParameters.ContainsKey('ScheduleDelayMinutes')) { $ScheduleDelayMinutes = $IntuneDefaults.ScheduleDelayMinutes }
+if (-not $PSBoundParameters.ContainsKey('ScheduleTriggerMode')) { $ScheduleTriggerMode = $IntuneDefaults.ScheduleTriggerMode }
+if (-not $PSBoundParameters.ContainsKey('HasIntuneRemediationsLicense')) { $HasIntuneRemediationsLicense = $IntuneDefaults.HasIntuneRemediationsLicense }
 
 if ([string]::IsNullOrWhiteSpace($PackageZipUrl) -or $PackageZipUrl -like 'https://your-storage.example.com/*') {
     throw "PackageZipUrl is not configured. Edit Intune-Bootstrap-Windows11Debloat.ps1 and set a real package URL before uploading to Intune."
@@ -197,6 +227,11 @@ Write-Info "  JiraProjectKey: $(if ([string]::IsNullOrWhiteSpace($JiraProjectKey
 Write-Info "  JiraIssueType: $(if ([string]::IsNullOrWhiteSpace($JiraIssueType)) { '<not-set>' } else { $JiraIssueType })"
 Write-Info "  JiraUserEmail: $(if ([string]::IsNullOrWhiteSpace($JiraUserEmail)) { '<not-set>' } else { $JiraUserEmail })"
 Write-Info "  JiraApiToken: $(Get-MaskedValue -Value $JiraApiToken)"
+Write-Info "  EnableScheduledRerun: $([bool]$EnableScheduledRerun)"
+Write-Info "  ScheduleIntervalDays: $ScheduleIntervalDays"
+Write-Info "  ScheduleDelayMinutes: $ScheduleDelayMinutes"
+Write-Info "  ScheduleTriggerMode: $ScheduleTriggerMode"
+Write-Info "  HasIntuneRemediationsLicense: $([bool]$HasIntuneRemediationsLicense)"
 
 New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
 New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
@@ -297,6 +332,19 @@ try {
             $comboArgs.Add('-TicketRing')
             $comboArgs.Add($TicketRing)
         }
+    }
+
+    if ($HasIntuneRemediationsLicense) {
+        $comboArgs.Add('-HasIntuneRemediationsLicense')
+    }
+    elseif ($EnableScheduledRerun) {
+        $comboArgs.Add('-EnableScheduledRerun')
+        $comboArgs.Add('-ScheduleIntervalDays')
+        $comboArgs.Add([string]$ScheduleIntervalDays)
+        $comboArgs.Add('-ScheduleDelayMinutes')
+        $comboArgs.Add([string]$ScheduleDelayMinutes)
+        $comboArgs.Add('-ScheduleTriggerMode')
+        $comboArgs.Add($ScheduleTriggerMode)
     }
 
     Write-Info 'Running debloat combo script from staged package'
