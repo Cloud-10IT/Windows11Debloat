@@ -153,6 +153,98 @@ function New-CleanDirectory {
     New-Item -Path $Path -ItemType Directory -Force | Out-Null
 }
 
+function Set-NetworkDefaults {
+    try {
+        $desired = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        if ([Enum]::GetNames([Net.SecurityProtocolType]) -contains 'Tls13') {
+            $desired = $desired -bor [Net.SecurityProtocolType]::Tls13
+        }
+
+        [Net.ServicePointManager]::SecurityProtocol = $desired
+        Write-Info "SecurityProtocol configured as: $([Net.ServicePointManager]::SecurityProtocol)"
+    }
+    catch {
+        Write-Info "Unable to set SecurityProtocol explicitly: $($_.Exception.Message)"
+    }
+
+    try {
+        $proxy = [System.Net.WebRequest]::DefaultWebProxy
+        if ($null -ne $proxy) {
+            $proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+        }
+    }
+    catch {
+        Write-Info "Unable to set default proxy credentials: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-DownloadFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$OutFile,
+        [int]$MaxAttempts = 3,
+        [int]$RetryDelaySeconds = 5
+    )
+
+    $lastError = $null
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            if (Test-Path -Path $OutFile) {
+                Remove-Item -Path $OutFile -Force -ErrorAction SilentlyContinue
+            }
+
+            Write-Info "Download attempt $attempt/$MaxAttempts via Invoke-WebRequest"
+            Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
+
+            if (-not (Test-Path -Path $OutFile)) {
+                throw 'Download completed but output file does not exist.'
+            }
+
+            if ((Get-Item -Path $OutFile).Length -le 0) {
+                throw 'Download completed but output file is empty.'
+            }
+
+            return
+        }
+        catch {
+            $lastError = $_
+            Write-Info "Invoke-WebRequest attempt $attempt failed: $($_.Exception.Message)"
+
+            try {
+                if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
+                    if (Test-Path -Path $OutFile) {
+                        Remove-Item -Path $OutFile -Force -ErrorAction SilentlyContinue
+                    }
+
+                    Write-Info "Download attempt $attempt/$MaxAttempts via Start-BitsTransfer"
+                    Start-BitsTransfer -Source $Uri -Destination $OutFile -ErrorAction Stop
+
+                    if (-not (Test-Path -Path $OutFile)) {
+                        throw 'BITS completed but output file does not exist.'
+                    }
+
+                    if ((Get-Item -Path $OutFile).Length -le 0) {
+                        throw 'BITS completed but output file is empty.'
+                    }
+
+                    return
+                }
+            }
+            catch {
+                $lastError = $_
+                Write-Info "Start-BitsTransfer attempt $attempt failed: $($_.Exception.Message)"
+            }
+
+            if ($attempt -lt $MaxAttempts) {
+                Start-Sleep -Seconds $RetryDelaySeconds
+            }
+        }
+    }
+
+    throw "Failed to download package from '$Uri' after $MaxAttempts attempts. Last error: $($lastError.Exception.Message)"
+}
+
 $hostExe = Resolve-HostExecutable
 $tempRoot = Join-Path -Path $env:TEMP -ChildPath ('Windows11DebloatBootstrap-' + [Guid]::NewGuid().ToString('N'))
 $zipPath = Join-Path -Path $tempRoot -ChildPath 'Windows11Debloat.zip'
@@ -183,8 +275,9 @@ New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
 New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
 
 try {
+    Set-NetworkDefaults
     Write-Info "Downloading package zip from: $PackageZipUrl"
-    Invoke-WebRequest -Uri $PackageZipUrl -OutFile $zipPath -UseBasicParsing
+    Invoke-DownloadFile -Uri $PackageZipUrl -OutFile $zipPath
 
     if (-not [string]::IsNullOrWhiteSpace($PackageZipSha256)) {
         Write-Info 'Validating downloaded package SHA-256 hash'
