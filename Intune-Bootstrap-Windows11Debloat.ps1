@@ -126,6 +126,16 @@ if ([string]::IsNullOrWhiteSpace($PackageZipUrl) -or $PackageZipUrl -like 'https
     throw "PackageZipUrl is not configured. Edit Intune-Bootstrap-Windows11Debloat.ps1 and set a real package URL before uploading to Intune."
 }
 
+$packageUri = $null
+if (-not [System.Uri]::TryCreate($PackageZipUrl, [System.UriKind]::Absolute, [ref]$packageUri)) {
+    throw "PackageZipUrl is not a valid absolute URL: '$PackageZipUrl'"
+}
+
+$isSharePointOrOneDriveHost = $packageUri.Host -match '(^|\.)sharepoint\.com$|(^|\.)sharepoint-df\.com$|(^|\.)onedrive\.live\.com$|(^|\.)1drv\.ms$'
+if ($isSharePointOrOneDriveHost) {
+    throw "PackageZipUrl points to SharePoint/OneDrive ('$($packageUri.Host)'). Intune platform scripts run as LocalSystem and usually cannot access user-authenticated SharePoint links. Use a direct non-interactive download URL (for example Azure Blob SAS or other anonymous artifact URL)."
+}
+
 function Write-Info {
     param([string]$Message)
     Write-Host "[INFO] $Message"

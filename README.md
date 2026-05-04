@@ -206,6 +206,21 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 For full Intune setup including bootstrap, Remediations blade, upload-time parameter checklist, and MDM/RMM deployment: see **[DEPLOY.md](DEPLOY.md)**.
 
+### Intune bootstrap package URL requirements
+
+When using `Intune-Bootstrap-Windows11Debloat.ps1`, `PackageZipUrl` must be a direct non-interactive file download URL.
+
+Use:
+- Azure Blob URL with SAS token
+- Anonymous artifact URL from your software distribution platform
+
+Do not use:
+- SharePoint or OneDrive sharing links (including `*.sharepoint.com`, `*.sharepoint-df.com`, `*.onedrive.live.com`, `*.1drv.ms`)
+
+Why: Intune platform scripts run as LocalSystem. User-authenticated SharePoint/OneDrive links usually fail in that context.
+
+The bootstrap script now fails fast with a clear error if `PackageZipUrl` points to a SharePoint/OneDrive host.
+
 ---
 
 ### Cleanup scope split
