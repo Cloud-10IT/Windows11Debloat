@@ -155,12 +155,13 @@ function New-CleanDirectory {
 
 function Set-NetworkDefaults {
     try {
-        $desired = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $desired = [Net.SecurityProtocolType]::Tls12
         if ([Enum]::GetNames([Net.SecurityProtocolType]) -contains 'Tls13') {
             $desired = $desired -bor [Net.SecurityProtocolType]::Tls13
         }
 
         [Net.ServicePointManager]::SecurityProtocol = $desired
+        [Net.ServicePointManager]::Expect100Continue = $false
         Write-Info "SecurityProtocol configured as: $([Net.ServicePointManager]::SecurityProtocol)"
     }
     catch {
@@ -187,6 +188,7 @@ function Invoke-DownloadFile {
     )
 
     $lastError = $null
+    $errorMessages = [System.Collections.Generic.List[string]]::new()
 
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
@@ -209,7 +211,43 @@ function Invoke-DownloadFile {
         }
         catch {
             $lastError = $_
+            $errorMessages.Add("Invoke-WebRequest attempt $attempt failed: $($_.Exception.Message)")
             Write-Info "Invoke-WebRequest attempt $attempt failed: $($_.Exception.Message)"
+
+            try {
+                if (Test-Path -Path $OutFile) {
+                    Remove-Item -Path $OutFile -Force -ErrorAction SilentlyContinue
+                }
+
+                Write-Info "Download attempt $attempt/$MaxAttempts via System.Net.WebClient"
+                $webClient = New-Object System.Net.WebClient
+                $webClient.Proxy = [System.Net.WebRequest]::DefaultWebProxy
+                if ($null -ne $webClient.Proxy) {
+                    $webClient.Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+                }
+
+                try {
+                    $webClient.DownloadFile($Uri, $OutFile)
+                }
+                finally {
+                    $webClient.Dispose()
+                }
+
+                if (-not (Test-Path -Path $OutFile)) {
+                    throw 'WebClient completed but output file does not exist.'
+                }
+
+                if ((Get-Item -Path $OutFile).Length -le 0) {
+                    throw 'WebClient completed but output file is empty.'
+                }
+
+                return
+            }
+            catch {
+                $lastError = $_
+                $errorMessages.Add("WebClient attempt $attempt failed: $($_.Exception.Message)")
+                Write-Info "WebClient attempt $attempt failed: $($_.Exception.Message)"
+            }
 
             try {
                 if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
@@ -233,7 +271,39 @@ function Invoke-DownloadFile {
             }
             catch {
                 $lastError = $_
+                $errorMessages.Add("Start-BitsTransfer attempt $attempt failed: $($_.Exception.Message)")
                 Write-Info "Start-BitsTransfer attempt $attempt failed: $($_.Exception.Message)"
+            }
+
+            try {
+                $certutilPath = Join-Path -Path $env:WINDIR -ChildPath 'System32\certutil.exe'
+                if (Test-Path -Path $certutilPath) {
+                    if (Test-Path -Path $OutFile) {
+                        Remove-Item -Path $OutFile -Force -ErrorAction SilentlyContinue
+                    }
+
+                    Write-Info "Download attempt $attempt/$MaxAttempts via certutil"
+                    & $certutilPath -urlcache -split -f $Uri $OutFile | Out-Null
+
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "certutil exited with code $LASTEXITCODE"
+                    }
+
+                    if (-not (Test-Path -Path $OutFile)) {
+                        throw 'certutil completed but output file does not exist.'
+                    }
+
+                    if ((Get-Item -Path $OutFile).Length -le 0) {
+                        throw 'certutil completed but output file is empty.'
+                    }
+
+                    return
+                }
+            }
+            catch {
+                $lastError = $_
+                $errorMessages.Add("certutil attempt $attempt failed: $($_.Exception.Message)")
+                Write-Info "certutil attempt $attempt failed: $($_.Exception.Message)"
             }
 
             if ($attempt -lt $MaxAttempts) {
@@ -242,7 +312,8 @@ function Invoke-DownloadFile {
         }
     }
 
-    throw "Failed to download package from '$Uri' after $MaxAttempts attempts. Last error: $($lastError.Exception.Message)"
+    $details = if ($errorMessages.Count -gt 0) { [string]::Join(' | ', $errorMessages.ToArray()) } else { $lastError.Exception.Message }
+    throw "Failed to download package from '$Uri' after $MaxAttempts attempts. Details: $details"
 }
 
 $hostExe = Resolve-HostExecutable
